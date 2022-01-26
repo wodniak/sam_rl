@@ -1,0 +1,43 @@
+<launch>
+
+    <!-- Configurable arguments -->
+    <arg name="robot_name"          default="sam"/>
+    <arg name="xy_tolerance"        default="1."/>
+    <arg name="depth_tolerance"     default="1."/>
+    <arg name="prediction_horizon"  default="5"/>
+    <arg name="loop_freq"           default="20."/>
+
+    <!-- topics, note the root! -->
+    <arg name="state_feedback_topic" default="/$(arg robot_name)/dr/odom" />
+    <arg name="setpoint_topic"       default="/$(arg robot_name)/ctrl/rl/setpoint" />
+    <arg name="rl_vbs_topic"        default="/$(arg robot_name)/ctrl/rl/vbs" />
+    <arg name="rl_lcg_topic"         default="/$(arg robot_name)/ctrl/rl/lcg" />
+    <arg name="rl_rpm1_topic"        default="/$(arg robot_name)/ctrl/rl/rpm1" />
+    <arg name="rl_rpm2_topic"        default="/$(arg robot_name)/ctrl/rl/rpm2" />
+    <arg name="rl_vec_topic"         default="/$(arg robot_name)/ctrl/rl/vec" />
+    <arg name="enable_topic"         default="/$(arg robot_name)/ctrl/rl/enable" />
+
+    <node name="rl_trainer" pkg="sam_rl" type="trainer_node.py" output="screen" ns="$(arg robot_name)/ctrl">
+		<param name="xy_tolerance"          value="$(arg xy_tolerance)"/>
+		<param name="depth_tolerance"       value="$(arg depth_tolerance)"/>
+		<param name="prediction_horizon"    value="$(arg prediction_horizon)"/>
+		<param name="loop_freq"             value="$(arg loop_freq)"/>
+        <param name="state_feedback_topic"  value="$(arg state_feedback_topic)" />	                
+		<param name="setpoint_topic"        value="$(arg setpoint_topic)" />		
+        <param name="vbs_topic"             value="$(arg rl_vbs_topic)" />
+        <param name="lcg_topic"             value="$(arg rl_lcg_topic)" />
+		<param name="enable_topic"          value="$(arg enable_topic)" />
+	</node>
+
+    <!-- Launch wrapper to publish to actuators  -->
+    <node name="actuator_interface" pkg="sam_rl" type="actuator_interface.py" output="screen" ns="$(arg robot_name)/ctrl">
+        <param name="loop_freq"        value="$(arg loop_freq)"/>
+        <param name="enable_topic"     value="$(arg enable_topic)" />
+        <param name="rl_rpm1_topic"    value="$(arg rl_rpm1_topic)" />
+        <param name="rl_rpm2_topic"    value="$(arg rl_rpm2_topic)" />
+        <param name="rl_vec_topic"     value="$(arg rl_vec_topic)" />
+        <param name="rl_vbs_topic"     value="$(arg rl_vbs_topic)" />
+        <param name="rl_lcg_topic"     value="$(arg rl_lcg_topic)" />
+	</node>
+
+</launch>
