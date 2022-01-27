@@ -30,6 +30,7 @@ import utils
 import torch
 import time
 
+from torch.utils.tensorboard import SummaryWriter
 from agents.agent_ddpg import DDPGAgent, ReplayBuffer
 
 # ROS
@@ -85,7 +86,8 @@ class ROS_SAM(object):
             lcg_topic, PercentStamped, queue_size=queue_size)
 
         # Variables
-        self.current_setpoint = []
+        self.current_setpoint = np.array(
+            [0.0, 0.0, 5.0, 0.0, 0.52, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.state = []
         self.state_timestamp = 0
         self.output = []
@@ -154,14 +156,29 @@ class ROS_SAM(object):
     def _enable_cb(self):
         pass
 
+    def publish_actions(self, action):
+        lcg = PercentStamped()
+        vbs = PercentStamped()
+        # rpm1 = ThrusterRPM()
+        # rpm2 = ThrusterRPM()
+        # vec = ThrusterAngles()
+
+        vbs.value = action[0]
+        lcg.value = action[1]
+        # self.rpm1_pub.publish(rpm1)
+        # self.rpm2_pub.publish(rpm2)
+        # self.vec_pub.publish(vec)
+        self.vbs_pub.publish(vbs)
+        self.lcg_pub.publish(lcg)
+
 
 class SAMEnv(ROS_SAM):
     def __init__(self):
         super(SAMEnv, self).__init__()
 
-        self.state_dim = torch.Size([1, 12])
-        self.action_dim = torch.Size([1, 2])  # LCG, VBS
-        self.max_action = np.array([1, 1])  # max LCG = 1, max VBS = 1
+        self.state_dim = 12
+        self.action_dim = 2  # LCG, VBS
+        self.max_action = np.array([100, 100])  # max LCG = 1, max VBS = 1
 
         self.last_state_timestamp = self.state_timestamp
 
@@ -170,12 +187,12 @@ class SAMEnv(ROS_SAM):
 
         while self.last_state_timestamp == self.state_timestamp:
             rospy.loginfo('Waiting for new observation')
-            time.sleep(0.002)  # wait 2ms
+            time.sleep(0.05)  # wait 2ms
 
         return self.state
 
     def step(self, action):
-        self._publish_actions(action)
+        self.publish_actions(action)
 
         # probably after a short wait
         next_state = self.get_observation()
@@ -189,12 +206,13 @@ class SAMEnv(ROS_SAM):
 
     def _calculate_reward(self, state, target):
         # penalize on depth and elevation angle
-        error = np.sqrt(np.pow(state[:, [2, 4]]-target[:, [2, 4]]))
+        error = np.sqrt(
+            np.power(state[2] - target[2], 2) + np.power(state[4] - target[4], 2))
         return -error
 
     def _is_done(self, state, target):
         eps = 1e-3
-        return np.isclose(state[:, [2, 4]], target[:, [2, 4]], rtol=eps)
+        return np.isclose(state[2], target[2], rtol=eps) and np.isclose(state[4], target[4], rtol=eps)
 
 
 class Trainer(object):
@@ -204,15 +222,14 @@ class Trainer(object):
             'cuda:0' if torch.cuda.is_available() else 'cpu')
 
         # Learning parameters
-        self.train_episodes = 100
-        self.tau = 0.005
+        self.tau = 0.01
         self.discount = 0.99
-        self.replay_buffer_max_size = 1e6
-        self.batch_size = 64
-        self.expl_noise = 0.01
+        self.replay_buffer_max_size = int(1e4)
+        self.batch_size = 128
+        self.expl_noise = 0.001
 
         self.max_epoch = 100
-        self.max_timesteps = 200  # per epoch
+        self.max_timesteps = 2000  # per epoch
 
         # Init environment
         self.env = SAMEnv()
@@ -244,8 +261,7 @@ class Trainer(object):
             self.last_episode = -1
 
         # Set up tensorboard logging
-        self.tf_writer = utils.tensorboard.SummaryWriter(
-            os.path.join('logs', self.start_time))
+        self.tf_writer = SummaryWriter(os.path.join('logs', self.start_time))
 
     def train(self):
         """
@@ -256,21 +272,21 @@ class Trainer(object):
         epoch_rewards = []
 
         for epoch in range(1, self.max_epoch + 1):
-            state = self.env.reset()
+            state = self.env.get_observation()
             epoch_reward = 0
             done = False
 
             ts = 0
             while ts < self.max_timesteps:
                 # Calculate action
-                noise = np.random.normal(0, self.max_action * self.expl_noise,
-                                         size=self.action_dimension)
-                state = np.array(state) + noise
+                noise = np.random.normal(0, self.env.max_action * self.expl_noise,
+                                         size=self.env.action_dim)
+                # state = np.array(state) + noise
                 action = self.agent.select_action(state)
-                action.clip(0, self.max_action)
+                np.clip(action, 0, self.env.max_action[1], out=action)
 
                 # Make action
-                next_state, reward, done, _ = self.env.step(action)
+                next_state, reward, done = self.env.step(action)
                 done = float(done) if ts < self.max_timesteps else 0
 
                 # Record it
@@ -290,7 +306,7 @@ class Trainer(object):
 
             # After each epoch
             epoch_rewards.append(epoch_reward)
-            rospy.loginfo('Epoch: {} Steps: {%2d} Reward: {%7.2f}'.format(
+            rospy.loginfo('Epoch: {} Steps: {} Reward: {}'.format(
                 epoch, ts, epoch_reward))
 
 

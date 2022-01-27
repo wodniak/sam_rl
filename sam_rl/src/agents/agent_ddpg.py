@@ -81,10 +81,11 @@ class DDPGAgent(object):
         self.discount = discount
         self.tau = tau
 
+        max_action = torch.FloatTensor(max_action).to(self.device)
         self.actor = Actor(state_dim, action_dim, max_action).to(device)
         self.critic = Critic(state_dim, action_dim).to(device)
 
-        self.actor_target = torch.deepcopy(self.actor)
+        self.actor_target = deepcopy(self.actor)
         self.critic_target = deepcopy(self.critic)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters())
@@ -94,7 +95,7 @@ class DDPGAgent(object):
         state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
         return self.actor(state).cpu().data.numpy().flatten()
 
-    @staticmethod
+    @ staticmethod
     def soft_update(local_model, target_model, tau):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(
