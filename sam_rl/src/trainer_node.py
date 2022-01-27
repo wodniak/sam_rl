@@ -22,16 +22,19 @@
 #  LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 #  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from cmath import sqrt
 import os
 import datetime
 import numpy as np
 import utils
 import torch
+import time
+
+from agents.agent_ddpg import DDPGAgent, ReplayBuffer
 
 # ROS
 import rospy
 from nav_msgs.msg import Path, Odometry
-#from geometry_msgs.msg import PoseStamped, PointStamped
 
 # SMARC
 from smarc_msgs.msg import ThrusterRPM
@@ -64,9 +67,9 @@ class ROS_SAM(object):
 
         # Subscribers to state feedback, setpoints and enable flags
         rospy.Subscriber(state_feedback_topic, Odometry,
-                         self.state_feedback_cb)
-        rospy.Subscriber(setpoint_topic, Odometry, self.setpoint_cb)
-        rospy.Subscriber(enable_topic, Bool, self.enable_cb)
+                         self._state_feedback_cb)
+        rospy.Subscriber(setpoint_topic, Odometry, self._setpoint_cb)
+        rospy.Subscriber(enable_topic, Bool, self._enable_cb)
 
         # Publishers to actuators
         queue_size = 1
@@ -84,11 +87,12 @@ class ROS_SAM(object):
         # Variables
         self.current_setpoint = []
         self.state = []
+        self.state_timestamp = 0
         self.output = []
 
-    def state_feedback_cb(self, odom_msg):
-        """ 
-        Subscribe to state feedback 
+    def _state_feedback_cb(self, odom_msg):
+        """
+        Subscribe to state feedback
         """
         x = odom_msg.pose.pose.position.y
         y = odom_msg.pose.pose.position.x
@@ -114,18 +118,15 @@ class ROS_SAM(object):
         # position (3), rotation (3), linear velocity (3), angular velocity (3)
         # with euler angles
         current_state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
-        current_output = np.array(
-            [x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
-
         self.state = current_state
-        self.output = current_output
+        self.state_timestamp = odom_msg.header.stamp
 
-    def setpoint_cb(self, odom_msg):
-        """ 
+    def _setpoint_cb(self, odom_msg):
+        """
         Subscribe to reference trajectory
         """
         # Insert functon to get the publshed reference trajectory here
-        #print('getting setpont')
+        # print('getting setpont')
         x = odom_msg.pose.pose.position.x
         y = odom_msg.pose.pose.position.y
         z = odom_msg.pose.pose.position.z
@@ -146,52 +147,154 @@ class ROS_SAM(object):
         p = odom_msg.twist.twist.angular.x
         q = odom_msg.twist.twist.angular.y
         r = odom_msg.twist.twist.angular.z
-        self.current_setpoint = np.array([x, z, pitch, u, w, q])
 
-    def enable_cb(self):
+        state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
+        self.current_setpoint = state
+
+    def _enable_cb(self):
         pass
 
 
-class Trainer(ROS_SAM):
+class SAMEnv(ROS_SAM):
+    def __init__(self):
+        super(SAMEnv, self).__init__()
+
+        self.state_dim = torch.Size([1, 12])
+        self.action_dim = torch.Size([1, 2])  # LCG, VBS
+        self.max_action = np.array([1, 1])  # max LCG = 1, max VBS = 1
+
+        self.last_state_timestamp = self.state_timestamp
+
+    def get_observation(self):
+        """Return state with different timestamp then before"""
+
+        while self.last_state_timestamp == self.state_timestamp:
+            rospy.loginfo('Waiting for new observation')
+            time.sleep(0.002)  # wait 2ms
+
+        return self.state
+
+    def step(self, action):
+        self._publish_actions(action)
+
+        # probably after a short wait
+        next_state = self.get_observation()
+        reward = self._calculate_reward(next_state, self.current_setpoint)
+        done = False
+        return next_state, reward, done
+
+    def reset(self):
+        # reset state to initial
+        pass
+
+    def _calculate_reward(self, state, target):
+        # penalize on depth and elevation angle
+        error = np.sqrt(np.pow(state[:, [2, 4]]-target[:, [2, 4]]))
+        return -error
+
+    def _is_done(self, state, target):
+        eps = 1e-3
+        return np.isclose(state[:, [2, 4]], target[:, [2, 4]], rtol=eps)
+
+
+class Trainer(object):
     def __init__(self, node_name):
-        super(Trainer, self).__init__()
+        # Parameters
+        self.device = torch.device(
+            'cuda:0' if torch.cuda.is_available() else 'cpu')
 
-        # Launch parameters
-        # self.train_episodes = rospy.get_param("~train_episodes", 100.0)
+        # Learning parameters
+        self.train_episodes = 100
+        self.tau = 0.005
+        self.discount = 0.99
+        self.replay_buffer_max_size = 1e6
+        self.batch_size = 64
+        self.expl_noise = 0.01
 
-        # init RL agent
-        # agent =
-        # agent = 0
+        self.max_epoch = 100
+        self.max_timesteps = 200  # per epoch
 
-        # # Load model weights and metadata if exist
-        # agent_dir = os.getcwd()
-        # model = f'{agent_dir}/sam_model.mdl'
-        # if os.path.exists(model):
-        #     rospy.loginfo('Loading model...')
-        #     self.start_time, self.last_episode = agent.load_model(model)
-        # else:
-        #     rospy.loginfo('No model found. Training from the beginning...')
-        #     self.start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
-        #     self.last_episode = -1
+        # Init environment
+        self.env = SAMEnv()
 
-        # # Set up tensorboard logging
-        # tf_writer = utils.tensorboard.SummaryWriter(
-        #     os.path.join('tensorboard_logs', self.start_time))
+        # Init RL agent
+        self.agent = DDPGAgent(state_dim=self.env.state_dim,
+                               action_dim=self.env.action_dim,
+                               max_action=self.env.max_action,
+                               device=self.device,
+                               discount=self.discount,
+                               tau=self.tau)
 
-    def start(self):
+        # Init Memory
+        self.replay_buffer = ReplayBuffer(
+            state_dimension=self.env.state_dim,
+            action_dimension=self.env.action_dim,
+            max_size=self.replay_buffer_max_size)
+
+        # Load model weights and metadata if exist
+        agent_dir = os.getcwd()
+        model = f'{agent_dir}/sam_model.mdl'
+        if os.path.exists(model):
+            rospy.loginfo('Loading model...')
+            # self.start_time, self.last_episode =
+            self.agent.load_checkpoint(model)
+        else:
+            rospy.loginfo('No model found. Training from the beginning...')
+            self.start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
+            self.last_episode = -1
+
+        # Set up tensorboard logging
+        self.tf_writer = utils.tensorboard.SummaryWriter(
+            os.path.join('logs', self.start_time))
+
+    def train(self):
         """
         Training loop
         """
-        self.rate = rospy.Rate(self.loop_freq)
-        while not rospy.is_shutdown():
-            self.train_iter()
-            self.rate.sleep()
+        # book-keeping
+        evaluations = []
+        epoch_rewards = []
 
-    def train_iter(self):
-        pass
+        for epoch in range(1, self.max_epoch + 1):
+            state = self.env.reset()
+            epoch_reward = 0
+            done = False
+
+            ts = 0
+            while ts < self.max_timesteps:
+                # Calculate action
+                noise = np.random.normal(0, self.max_action * self.expl_noise,
+                                         size=self.action_dimension)
+                state = np.array(state) + noise
+                action = self.agent.select_action(state)
+                action.clip(0, self.max_action)
+
+                # Make action
+                next_state, reward, done, _ = self.env.step(action)
+                done = float(done) if ts < self.max_timesteps else 0
+
+                # Record it
+                self.replay_buffer.add(
+                    state, action, next_state, reward, done)
+
+                # Train agent
+                if self.replay_buffer.is_ready(self.batch_size):
+                    self.agent.train(self.replay_buffer, self.batch_size)
+
+                state = next_state
+                epoch_reward += reward
+
+                ts += 1
+                if done:
+                    break
+
+            # After each epoch
+            epoch_rewards.append(epoch_reward)
+            rospy.loginfo('Epoch: {} Steps: {%2d} Reward: {%7.2f}'.format(
+                epoch, ts, epoch_reward))
 
 
 if __name__ == "__main__":
     rospy.init_node("rl_trainer")
     trainer = Trainer(rospy.get_name())
-    trainer.start()
+    trainer.train()
