@@ -31,7 +31,7 @@ import torch
 import time
 
 from torch.utils.tensorboard import SummaryWriter
-from agents.agent_ddpg import DDPGAgent, ReplayBuffer
+from agents.agent_ddpg import DDPGAgent, ReplayBuffer, OUActionNoise
 
 # ROS
 import rospy
@@ -86,8 +86,10 @@ class ROS_SAM(object):
             lcg_topic, PercentStamped, queue_size=queue_size)
 
         # Variables
+        # self.current_setpoint = np.array(
+        #     [0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.current_setpoint = np.array(
-            [0.0, 0.0, 5.0, 0.0, 0.52, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            [5.0, 0.0])
         self.state = []
         self.state_timestamp = 0
         self.output = []
@@ -107,7 +109,7 @@ class ROS_SAM(object):
         rpy = utils.euler_from_quaternion([eps1, eps2, eps3, eta0])
         roll = rpy[0]
         pitch = rpy[1]
-        yaw = (1.571-rpy[2])
+        yaw = (1.571-rpy[2]) # ENU to NED
 
         u = odom_msg.twist.twist.linear.x
         v = odom_msg.twist.twist.linear.y
@@ -119,7 +121,8 @@ class ROS_SAM(object):
         # state : (12 x 1)
         # position (3), rotation (3), linear velocity (3), angular velocity (3)
         # with euler angles
-        current_state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
+        # current_state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
+        current_state = np.array([z, w])
         self.state = current_state
         self.state_timestamp = odom_msg.header.stamp
 
@@ -157,38 +160,36 @@ class ROS_SAM(object):
         pass
 
     def publish_actions(self, action):
-        lcg = PercentStamped()
+        # lcg = PercentStamped()
         vbs = PercentStamped()
         # rpm1 = ThrusterRPM()
         # rpm2 = ThrusterRPM()
         # vec = ThrusterAngles()
 
         vbs.value = action[0]
-        lcg.value = action[1]
+        # lcg.value = action[1]
         # self.rpm1_pub.publish(rpm1)
         # self.rpm2_pub.publish(rpm2)
         # self.vec_pub.publish(vec)
         self.vbs_pub.publish(vbs)
-        self.lcg_pub.publish(lcg)
+        # self.lcg_pub.publish(lcg)
 
 
 class SAMEnv(ROS_SAM):
     def __init__(self):
         super(SAMEnv, self).__init__()
 
-        self.state_dim = 12
-        self.action_dim = 2  # LCG, VBS
-        self.max_action = np.array([100, 100])  # max LCG = 1, max VBS = 1
+        self.state_dim = 2
+        self.action_dim = 1  # LCG, VBS
+        self.max_action = np.array([100])  # max LCG = 1, max VBS = 1
 
         self.last_state_timestamp = self.state_timestamp
 
     def get_observation(self):
         """Return state with different timestamp then before"""
 
-        while self.last_state_timestamp == self.state_timestamp:
-            rospy.loginfo('Waiting for new observation')
-            time.sleep(0.05)  # wait 2ms
-
+        time.sleep(0.011)
+        self.last_state_timestamp = self.state_timestamp
         return self.state
 
     def step(self, action):
@@ -202,17 +203,20 @@ class SAMEnv(ROS_SAM):
 
     def reset(self):
         # reset state to initial
-        pass
+        vbs = PercentStamped()
+        self.vbs_pub.publish(vbs)
+        time.sleep(10)
+        return self.get_observation()
 
     def _calculate_reward(self, state, target):
         # penalize on depth and elevation angle
-        error = np.sqrt(
-            np.power(state[2] - target[2], 2) + np.power(state[4] - target[4], 2))
+        # add control penalty
+        error = np.power(state[0] - target[0], 2)
         return -error
 
     def _is_done(self, state, target):
         eps = 1e-3
-        return np.isclose(state[2], target[2], rtol=eps) and np.isclose(state[4], target[4], rtol=eps)
+        return np.isclose(state[2], target[2], rtol=eps)
 
 
 class Trainer(object):
@@ -221,18 +225,22 @@ class Trainer(object):
         self.device = torch.device(
             'cuda:0' if torch.cuda.is_available() else 'cpu')
 
-        # Learning parameters
-        self.tau = 0.01
-        self.discount = 0.99
-        self.replay_buffer_max_size = int(1e4)
-        self.batch_size = 128
-        self.expl_noise = 0.001
-
-        self.max_epoch = 100
-        self.max_timesteps = 2000  # per epoch
-
         # Init environment
         self.env = SAMEnv()
+
+        # Learning parameters
+        self.actor_lr = 0.001
+        self.critic_lr = 0.002
+        self.tau = 0.005
+        self.discount = 0.99
+        self.replay_buffer_max_size = int(5e5)
+        self.batch_size = 128
+        self.std_dev = 5 * np.ones(self.env.action_dim)
+        self.expl_noise = OUActionNoise(mean=np.zeros(
+            self.env.action_dim), std_deviation=self.std_dev)
+
+        self.train_epoch = 200
+        self.max_timesteps = 6000  # per epoch
 
         # Init RL agent
         self.agent = DDPGAgent(state_dim=self.env.state_dim,
@@ -240,7 +248,9 @@ class Trainer(object):
                                max_action=self.env.max_action,
                                device=self.device,
                                discount=self.discount,
-                               tau=self.tau)
+                               tau=self.tau,
+                               actor_lr=self.actor_lr,
+                               critic_lr=self.critic_lr)
 
         # Init Memory
         self.replay_buffer = ReplayBuffer(
@@ -249,12 +259,15 @@ class Trainer(object):
             max_size=self.replay_buffer_max_size)
 
         # Load model weights and metadata if exist
-        agent_dir = os.getcwd()
-        model = f'{agent_dir}/sam_model.mdl'
-        if os.path.exists(model):
-            rospy.loginfo('Loading model...')
+        self.agent_dir = os.path.expanduser('~') + '/.ros'
+        model_name = f'09.26.33-02.03.2022'
+        model = f'{self.agent_dir}/{model_name}'
+        if os.path.exists(model + '_critic'):
+            rospy.loginfo(f'Loading model {model}')
             # self.start_time, self.last_episode =
             self.agent.load_checkpoint(model)
+            self.start_time = model_name
+            self.last_episode = 83
         else:
             rospy.loginfo('No model found. Training from the beginning...')
             self.start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
@@ -271,32 +284,67 @@ class Trainer(object):
         evaluations = []
         epoch_rewards = []
 
-        for epoch in range(1, self.max_epoch + 1):
-            state = self.env.get_observation()
+        for epoch in range(self.last_episode + 1, self.last_episode + self.train_epoch + 1):
+            state = self.env.reset()  # it should reset to initial state here
+            # state = self.env.get_observation()
             epoch_reward = 0
             done = False
 
             ts = 0
             while ts < self.max_timesteps:
                 # Calculate action
-                noise = np.random.normal(0, self.env.max_action * self.expl_noise,
-                                         size=self.env.action_dim)
-                # state = np.array(state) + noise
                 action = self.agent.select_action(state)
-                np.clip(action, 0, self.env.max_action[1], out=action)
+                action += self.expl_noise()  # exploration
+                # rospy.loginfo_throttle(0.1, action)
+                np.clip(action, 0, self.env.max_action[0], out=action)
 
                 # Make action
                 next_state, reward, done = self.env.step(action)
-                done = float(done) if ts < self.max_timesteps else 0
 
                 # Record it
                 self.replay_buffer.add(
                     state, action, next_state, reward, done)
 
                 # Train agent
-                if self.replay_buffer.is_ready(self.batch_size):
-                    self.agent.train(self.replay_buffer, self.batch_size)
+                self.agent.train(self.replay_buffer, self.batch_size)
 
+                state = next_state
+                epoch_reward += reward
+
+                ts += 1
+                if done:
+                    break
+
+            # After each epoch
+            epoch_rewards.append(epoch_reward)
+            rospy.loginfo('Epoch: {} Steps: {} Reward: {}'.format(
+                epoch, ts, epoch_reward))
+
+            self.tf_writer.add_scalar('reward', epoch_reward, epoch)
+            if epoch % 10 == 0:
+                self.agent.save_checkpoint(self.start_time)
+
+    def test(self):
+        evaluations = []
+        epoch_rewards = []
+
+        test_epochs = 100
+        for epoch in range(0, test_epochs):
+            state = self.env.reset()  # it should reset to initial state here
+            # state = self.env.get_observation()
+            epoch_reward = 0
+            done = False
+
+            ts = 0
+            while ts < self.max_timesteps:
+                # Calculate action
+                action = self.agent.select_action(state)
+                action += self.expl_noise()  # exploration
+
+                np.clip(action, 0, self.env.max_action[0], out=action)
+
+                # Make action
+                next_state, reward, done = self.env.step(action)
                 state = next_state
                 epoch_reward += reward
 
@@ -314,3 +362,4 @@ if __name__ == "__main__":
     rospy.init_node("rl_trainer")
     trainer = Trainer(rospy.get_name())
     trainer.train()
+    # trainer.test()

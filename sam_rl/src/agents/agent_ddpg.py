@@ -8,13 +8,43 @@ import numpy as np
 from copy import deepcopy
 
 
+# Source : https://keras.io/examples/rl/ddpg_pendulum/
+class OUActionNoise:
+    def __init__(self, mean, std_deviation, theta=0.15, dt=1e-2, x_initial=None):
+        self.theta = theta
+        self.mean = mean
+        self.std_dev = std_deviation
+        self.dt = dt
+        self.x_initial = x_initial
+        self.reset()
+
+    def __call__(self):
+        # Formula taken from https://www.wikipedia.org/wiki/Ornstein-Uhlenbeck_process.
+        x = (
+            self.x_prev
+            + self.theta * (self.mean - self.x_prev) * self.dt
+            + self.std_dev * np.sqrt(self.dt) *
+            np.random.normal(size=self.mean.shape)
+        )
+        # Store x into x_prev
+        # Makes next noise dependent on current one
+        self.x_prev = x
+        return x
+
+    def reset(self):
+        if self.x_initial is not None:
+            self.x_prev = self.x_initial
+        else:
+            self.x_prev = np.zeros_like(self.mean)
+
+
 class Actor(torch.nn.Module):
 
     def __init__(self, state_dimension, action_dimension, max_action):
         super(Actor, self).__init__()
-        self.l1 = torch.nn.Linear(state_dimension, 400)
-        self.l2 = torch.nn.Linear(400, 300)
-        self.l3 = torch.nn.Linear(300, action_dimension)
+        self.l1 = torch.nn.Linear(state_dimension, 64)
+        self.l2 = torch.nn.Linear(64, 64)
+        self.l3 = torch.nn.Linear(64, action_dimension)
         self.max_action = max_action
 
     def forward(self, state):
@@ -27,14 +57,31 @@ class Critic(torch.nn.Module):
 
     def __init__(self, state_dimension, action_dimension):
         super(Critic, self).__init__()
-        self.l1 = torch.nn.Linear(state_dimension + action_dimension, 400)
-        self.l2 = torch.nn.Linear(400, 300)
-        self.l3 = torch.nn.Linear(300, 1)
+        # State
+        self.s1 = torch.nn.Linear(state_dimension, 16)
+        self.s_out = torch.nn.Linear(16, 32)
+
+        # Action
+        self.a_out = torch.nn.Linear(action_dimension, 32)
+
+        # common
+        self.c1 = torch.nn.Linear(64, 256) # a_out + s_out
+        self.c2 = torch.nn.Linear(256, 256)
+        self.c_out = torch.nn.Linear(256, 1)
 
     def forward(self, state, action):
-        q = F.relu(self.l1(torch.cat([state, action], 1)))
-        q = F.relu(self.l2(q))
-        return self.l3(q)
+        # forward action
+        a_out = F.relu(self.a_out(action))
+
+        # forward state
+        s_out = F.relu(self.s1(state))
+        s_out = F.relu(self.s_out(s_out))
+
+        # forward concat
+        c = torch.cat([s_out, a_out], 1)
+        out = F.relu(self.c1(c))
+        out = F.relu(self.c2(out))
+        return self.c_out(out)
 
 
 class ReplayBuffer(object):
@@ -76,7 +123,7 @@ class ReplayBuffer(object):
 
 class DDPGAgent(object):
 
-    def __init__(self, state_dim, action_dim, max_action, device, discount=0.99, tau=0.005):
+    def __init__(self, state_dim, action_dim, max_action, device, discount, tau, actor_lr, critic_lr):
         self.device = device
         self.discount = discount
         self.tau = tau
@@ -88,8 +135,10 @@ class DDPGAgent(object):
         self.actor_target = deepcopy(self.actor)
         self.critic_target = deepcopy(self.critic)
 
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters())
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters())
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(), lr=critic_lr)
 
     def select_action(self, state):
         state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
@@ -122,7 +171,6 @@ class DDPGAgent(object):
                 map_location=torch.device('cpu')
             )
         )
-        self.critic_target = deepcopy(self.critic)
         self.actor.load_state_dict(
             torch.load(
                 filename + "_actor",
@@ -135,6 +183,8 @@ class DDPGAgent(object):
                 map_location=torch.device('cpu')
             )
         )
+
+        self.critic_target = deepcopy(self.critic)
         self.actor_target = deepcopy(self.actor)
 
     def train(self, replay_buffer, batch_size=100):
