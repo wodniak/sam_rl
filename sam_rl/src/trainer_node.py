@@ -26,6 +26,8 @@ import os
 import datetime
 import numpy as np
 import torch
+import time
+import matplotlib.pyplot as plt
 
 from torch.utils.tensorboard import SummaryWriter
 from agents.agent_ddpg import DDPGAgent, ReplayBuffer, OUActionNoise
@@ -49,8 +51,8 @@ class Trainer(object):
             'cuda:0' if torch.cuda.is_available() else 'cpu')
 
         # Init environment
-        # self.env = SAMEnv()
-        self.env = EnvEOM_Task_Trim()
+        self.env = SAMEnv()
+        # self.env = EnvEOM_Task_Trim()
 
         # Learning parameters
         self.actor_lr = 0.001
@@ -60,12 +62,14 @@ class Trainer(object):
         self.replay_buffer_max_size = int(5e5)
         self.batch_size = 128
         self.std_dev = 5 * np.ones(self.env.action_dim)
+        # self.std_dev = 0.1 * np.ones(self.env.action_dim)
+
         self.expl_noise = OUActionNoise(mean=np.zeros(
             self.env.action_dim), std_deviation=self.std_dev)
 
-        self.train_epoch = 200
+        self.train_epoch = 2000
         # self.max_timesteps = 6000  # per epoch
-        self.max_timesteps = 400  # per epoch
+        self.max_timesteps = 600  # per epoch
 
         # Init RL agent
         self.agent = DDPGAgent(state_dim=self.env.state_dim,
@@ -84,27 +88,36 @@ class Trainer(object):
             max_size=self.replay_buffer_max_size)
 
         # Load model weights and metadata if exist
-        self.agent_dir = os.path.expanduser('~') + '/.ros'
-        model_name = f'09.26.33-02.03.2022'
-        model = f'{self.agent_dir}/{model_name}'
-        if os.path.exists(model + '_critic'):
-            rospy.loginfo(f'Loading model {model}')
-            # self.start_time, self.last_episode =
-            self.agent.load_checkpoint(model)
+        self.path_dir = os.path.expanduser('~') + '/catkin_ws/src/smarc_rl_controllers/sam_rl/logs'
+        if not os.path.exists(self.path_dir):
+            os.makedirs(self.path_dir)
+
+        agent_dir = self.path_dir + '/model/'
+        model_name = f'16.24.08-02.07.2022'
+
+        self.model_path = agent_dir + model_name
+        if os.path.exists(self.model_path + '_critic'):
+            rospy.loginfo(f'Loading model {self.model_path}')
+            self.agent.load_checkpoint(self.model_path)
             self.start_time = model_name
-            self.last_episode = 83
+            self.last_episode = 474
         else:
             rospy.loginfo('No model found. Training from the beginning...')
-            self.start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
+            start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
+            self.model_path = agent_dir + start_time
             self.last_episode = -1
 
         # Set up tensorboard logging
-        self.tf_writer = SummaryWriter(os.path.join('logs', self.start_time))
+        writer_dir = '/tensorboard_logs'
+        writer_path = self.path_dir + writer_dir
+        self.tf_writer = SummaryWriter(os.path.join(writer_path, self.start_time))
 
     def train(self):
         """
         Training loop
         """
+        np.set_printoptions(precision=2, suppress=True)
+
         # book-keeping
         evaluations = []
         epoch_rewards = []
@@ -115,13 +128,22 @@ class Trainer(object):
             epoch_reward = 0
             done = False
 
+            # for plots
+            actions = np.zeros(self.max_timesteps)
+            state_z = np.zeros(self.max_timesteps)
+            t = np.linspace(0,self.max_timesteps,self.max_timesteps).astype(int)
+
             ts = 0
             while ts < self.max_timesteps:
                 # Calculate action
                 action = self.agent.select_action(state)
                 action += self.expl_noise()  # exploration
                 # rospy.loginfo_throttle(0.1, action)
-                np.clip(action, 0, self.env.max_action[0], out=action)
+                np.clip(action, -1, 1, out=action)
+
+                # for plots
+                actions[ts] = action
+                state_z[ts] = state[0]
 
                 # Make action
                 next_state, reward, done = self.env.step(action)
@@ -142,20 +164,36 @@ class Trainer(object):
 
             # After each epoch
             epoch_rewards.append(epoch_reward)
-            rospy.loginfo('Epoch: {} Steps: {} Reward: {}'.format(
-                epoch, ts, epoch_reward))
+            rospy.loginfo('Epoch: {}  Steps: {} Reward: {:.2f}  End state: {}'.format(
+                epoch, ts, epoch_reward, state))
 
             self.tf_writer.add_scalar('reward', epoch_reward, epoch)
             if epoch % 10 == 0:
-                self.agent.save_checkpoint(self.start_time)
+                self.agent.save_checkpoint(self.model_path)
+
+                # visualize actions and Z
+                plot_dir = self.path_dir + '/plots/train/'
+                if not os.path.exists(plot_dir):
+                    os.makedirs(plot_dir)
+
+                fig, axs = plt.subplots(2)
+                axs[0].set_ylim([-1.1, 1.1])
+                axs[0].plot(t, actions)
+                axs[1].plot(t, state_z)
+                plt.savefig(plot_dir + f'{epoch}')
+
 
     def test(self):
         evaluations = []
         epoch_rewards = []
-        import time
 
-        test_epochs = 100
+        test_epochs = 10
         for epoch in range(0, test_epochs):
+            # for plots
+            actions = np.zeros(self.max_timesteps)
+            state_z = np.zeros(self.max_timesteps)
+            t = np.linspace(0,self.max_timesteps,self.max_timesteps).astype(int)
+
             state = self.env.reset()  # it should reset to initial state here
             # state = self.env.get_observation()
             epoch_reward = 0
@@ -165,11 +203,15 @@ class Trainer(object):
             while ts < self.max_timesteps:
                 # Calculate action
                 action = self.agent.select_action(state)
-                # action += self.expl_noise()  # exploration
-                np.clip(action, 0, self.env.max_action[0], out=action)
+                action += self.expl_noise()  # exploration
+                np.clip(action, -1, 1, out=action)
 
-                rospy.loginfo(f'state = {state.round(2)}, action = {action.round(2)}')
-                time.sleep(0.5)
+                # action[0] = (action[0] + 100) / 2
+                # action += self.expl_noise()  # exploration
+                # np.clip(action, 0, 100, out=action)
+
+                actions[ts] = action
+                state_z[ts] = state[0]
 
                 # Make action
                 next_state, reward, done = self.env.step(action)
@@ -182,10 +224,20 @@ class Trainer(object):
 
             # After each epoch
             epoch_rewards.append(epoch_reward)
-            print()
-            print()
             rospy.loginfo('--------------Epoch: {} Steps: {} Reward: {}'.format(
                 epoch, ts, epoch_reward))
+
+            # visualize actions and Z
+            plot_dir = self.path_dir + '/plots/test/'
+            if not os.path.exists(plot_dir):
+                os.makedirs(plot_dir)
+
+            fig, axs = plt.subplots(2)
+            axs[0].set_ylim([-1.1, 1.1])
+            axs[0].plot(t, actions)
+            axs[1].plot(t, state_z)
+            plt.savefig(plot_dir + f'{epoch}')
+
 
 
 if __name__ == "__main__":

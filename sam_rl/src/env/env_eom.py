@@ -25,10 +25,49 @@
 
 import math
 import numpy as np
-import matplotlib.pyplot as plt
 
 from scipy.integrate import solve_ivp
-from mpl_toolkits.mplot3d import Axes3D
+
+def T_b2ned(phi, theta, psi):
+    T = np.array([
+        [1, np.sin(phi)*np.tan(theta), np.cos(phi)*np.tan(theta)],
+        [0, np.cos(phi), -np.sin(phi)],
+        [0, np.sin(phi)/np.cos(theta), np.cos(phi)/np.cos(theta)],
+    ])
+    return T
+
+def R_b2ned(phi, theta, psi):
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(phi), -np.sin(phi)],
+        [0, np.sin(phi), np.cos(phi)]
+    ])
+    Ry = np.array([
+        [np.cos(theta), 0, np.sin(theta)],
+        [0, 1, 0],
+        [-np.sin(theta), 0, np.cos(theta)]
+    ])
+    Rz = np.array([
+        [np.cos(psi), -np.sin(psi), 0],
+        [np.sin(psi), np.cos(psi), 0],
+        [0, 0, 1]
+    ])
+    R = Rz@Ry@Rx
+    return R
+
+def unskew(mat):
+    return np.array([
+        mat[2,1],
+        mat[0,2],
+        mat[1,0]
+    ])
+
+def skew(vec):
+    return np.array([
+    [0, -vec[2], vec[1]],
+    [vec[2], 0, -vec[0]],
+    [-vec[1], vec[0], 0]
+    ])
 
 class EnvEOM(object):
     """
@@ -49,121 +88,118 @@ class EnvEOM(object):
 
         self.current_x = init_state
 
-
     def eom(self, state, control):
-        """
-        Nonlinear dynamics model function
-        """
-        # extract states and controls
-        x, z, theta, u, w, q = state
-        vbs, lcg = control
+        """Nonlinear dynamics model function"""
+        # state and control
+        x, y, z, phi, theta, psi, u, v, w, p, q, r = state
+        rpm1, rpm2, de, dr, lcg, vbs = control
+        # rpm1, rpm2, de, dr = control #(AUV specific)
 
-        #scale controls from -1 to 1 to the correct ranges
-        vbs_scale = 1.
-        lcg_scale = 1.
+        # position (NED) and velocity (body), rsp
+        eta = np.array([x, y, z, phi, theta, psi])
+        nu = np.array([u, v, w, p, q, r])
 
-        vbs = vbs * vbs_scale
-        lcg = lcg * lcg_scale
+        # scaled controls (AUV specific)
+        rpm1 *= 1000.0
+        rpm2 *= 1000.0
+        de *= 0.05
+        dr *= 0.05
+        vbs *= 1.0
+        lcg *= 1.0
 
-        eta= np.array([[x], [z], [theta]])
-        nu= np.array([[u], [w], [q]])
+        # mass and inertia matrix : (AUV specific)
+        m = 14.0
+        I_o = np.diag(np.array([0.0294, 1.6202, 1.6202]))
 
-        # assign parameters
-        m = 15.4 # mass
-        Iyy = 1.6202
+        # centre of gravity, buoyancy, and pressure positions, resp. (AUV specific)
+        r_g = np.array([0.1 + lcg*0.01, 0.0, 0.0]) # Including Longitudinal C.G. trim system
+        # r_g = np.array([0.1, 0.0, 0.0]) #no effect of Longitudinal C.G. trim system
+        r_b = np.array([0.1, 0.0, 0.0])
+        r_cp = np.array([0.1, 0.0, 0.0])
 
-        #cg position
-        x_g = 0.0 + lcg*0.01
-        z_g = 0.
-
-        #cb position
-        x_b = 0.0
-        z_b = 0.
-
-        #center of pressure position
-        x_cp = 0.1
-        z_cp = 0.
-
+        # Buoyancy effects
         W = m*9.81
-        B = W + vbs*1.5 #include VBS effect
+        B = W + vbs*1.5  #(AUV specific if a Variable Buoyancy System exists)
+        # B = W #no effect of Variable buoyancy system
 
-        #Hydrodynamic coefficients
-        Xuu = 3 #0.8 #1.
-        Zww = 50.0 #100.
-        Mqq = 40.0 #100.
+        # hydrodynamic coefficients (AUV specific)
+        Xuu = 5.
+        Yvv = 20.
+        Zww = 50.
+        Kpp = 0.1
+        Mqq = 20.
+        Nrr = 20.
 
-        # Control actuators
-        KT = 0.0175
+        # Thruster coefficients (AUV specific)
+        K_T = np.array([0.0175, 0.0175])
+        Q_T = np.array([0.001, -0.001])#*0.0
 
-        # Mass and inertia matrix
-        M = np.array([[m, 0., m*z_g],
-                    [0, m, -m*x_g],
-                    [m*z_g, -m*x_g, Iyy]])
-        assert M.shape == (3,3), M
+        # mass and inertia matrix
+        M = np.block([
+            [m*np.eye(3,3), -m*skew(r_g)],
+            [m*skew(r_g), I_o]
+        ])
+        assert M.shape == (6,6), M
 
-        # Coriolis and centripetal matrix
-        C_RB = np.array([[0., 0., -m*(x_g*q-w)],
-                        [0., 0., -m*(z_g*q+u)],
-                        [m*(x_g*q-w), m*(z_g*q+u), 0.]])
-        assert C_RB.shape == (3,3), C_RB
+        # coriolis and centripetal matrix
+        nu1 = np.array([u, v, w])
+        nu2 = np.array([p, q, r])
+        top_right = -m*skew(nu1) - m*skew(nu2)*skew(r_g)
+        bottom_left = -m*skew(nu1) + m*skew(r_g)*skew(nu2)
+        bottom_right = -skew(I_o.dot(nu2))
+        C_RB = np.block([
+            [np.zeros((3,3)), top_right],
+            [bottom_left, bottom_right]
+        ])
+        assert C_RB.shape == (6, 6), C_RB
 
-        #Damping matrix
-        D = np.array([[Xuu*abs(u), 0., 0.],
-                    [0, Zww*abs(w), 0],
-                    [-z_cp*Xuu*abs(u), x_cp*Zww*abs(w), Mqq*abs(q)]])
+        # damping matrix (AUV specific - This layout is for a slender AUV)
+        forces = np.diag(np.array([Xuu*np.abs(u), Yvv*np.abs(v), Zww*np.abs(w)]))
+        moments = np.diag(np.array([Kpp*np.abs(p), Mqq*np.abs(q), Nrr*np.abs(r)]))
+        coupling = np.matmul(skew(r_cp), forces)
+        D = np.block([[forces, np.zeros((3, 3))], [-coupling, moments]])
+        assert D.shape == (6, 6), D
 
-        assert D.shape == (3,3), D
-
-
-        #rotational transform for kinematics
-        J_eta = np.array([[np.cos(theta), np.sin(theta), 0.],
-                        [-np.sin(theta), np.cos(theta), 0.],
-                        [0., 0.,  1.]])
-        assert J_eta.shape == (3,3), J_eta
+        # rotational transform between body and NED in Euler
+        T_euler = T_b2ned(phi, theta, psi)
+        R_euler = R_b2ned(phi, theta, psi)
+        assert R_euler.shape == (3,3), R_euler
+        J_eta = np.block([
+            [R_euler, np.zeros((3,3))],
+            [np.zeros((3,3)), T_euler]
+        ])
+        assert J_eta.shape == (6,6), J_eta
 
         # buoyancy in quaternions
-        f_g = W
-        f_b = -B
-        geta = np.array([[(W-B)*np.sin(theta)],
-                        [-(W-B)*np.cos(theta)],
-                        [(z_g*W-z_b*B)*np.sin(theta)+(x_g*W-x_b*B)*np.cos(theta)]])
-        assert geta.shape == (3,1), geta
+        f_g = np.array([0, 0, W])
+        f_b = np.array([0, 0, -B])
+        row1 = np.linalg.inv(R_euler).dot(f_g + f_b)
+        row2 = skew(r_g).dot(np.linalg.inv(R_euler)).dot(f_g) + \
+            skew(r_b).dot(np.linalg.inv(R_euler)).dot(f_b)
+        geta = np.block([row1, row2])
+        assert geta.shape == (6,), geta
 
-        # controls
-        #F_T= KT*rpm
-        #r_LCG = np.array([lcg*0.01, 0, 0])
-        #M_LCG = skew(r_LCG).dot(np.linalg.inv(R_q)).dot(f_g)
+        # Effect of control actuators (AUV specific)
+        F_T = K_T.dot(np.array([rpm1, rpm2]))
+        M_T = Q_T.dot(np.array([rpm1, rpm2]))
+        tauc = np.array([
+            F_T*np.cos(de)*np.cos(dr),
+            -F_T*np.sin(dr),
+            F_T*np.sin(de)*np.cos(dr),
+            M_T*np.cos(de)*np.cos(dr),
+            -M_T*np.sin(dr),
+            M_T*np.sin(de)*np.cos(dr)
+        ])
+        assert tauc.shape == (6,), tauc
 
-
-        tauc = np.block([ [0.],
-                        [0.],
-                        #[W*np.cos(theta)*lcg*0.01]]) #including LCG as a moment
-                        [0.] ])
-
-        #tau_LCG = -np.block([[np.zeros([3,1])],
-        #                    [M_LCG]])
-
-        #tauc = tauc + tau_LCG
-
-        assert tauc.shape == (3,1), tauc
-        # Kinematics
+        # rate of change of position in NED frame
         etadot = np.block([J_eta.dot(nu)])
+        assert etadot.shape == (6,)
 
-        assert etadot.shape == (3,1), etadot
+        nudot = np.linalg.pinv(M).dot(tauc - (C_RB + D).dot(nu) - geta)
 
-        # Dynamics
-        invM = np.linalg.inv(M)
-        crbd = C_RB+D
-        other = crbd.dot(nu)
-        other2 = tauc-other-geta
-        nudot = invM.dot(other2)
-
-        assert nudot.shape == (3,1), nudot
-
-        sdot= np.block([ [etadot],
-                        [nudot] ])
-
-        return sdot.flatten()
+        # state-space dynamics
+        return np.hstack((etadot, nudot))
 
     def propagate(self, state, action, t0, tf, atol, rtol, method):
         """
@@ -204,10 +240,11 @@ class EnvEOM_Task_Trim(object):
     Define common API to env and cost function for the task
     """
     def __init__(self):
-        self.init_state = np.array([0., 0.2, 0.18, 0., 0., 0.]) # x, z, theta, u, w, q
+        # self.init_state = np.array([0., 0.2, 0.18, 0., 0., 0.]) # x, z, theta, u, w, q
+        self.init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
         self.env = EnvEOM(self.init_state)
 
-        self.current_setpoint = np.array([0.0, 5.0, 0.15, 0, 0, 0])
+        self.current_setpoint = np.array([0., 0., 5.0, 0.15, 0.1, 0., 0., 0., 0., 0., 0., 0.])
 
         self.state_dim = 2
         self.action_dim = 1  # VBS
@@ -215,11 +252,11 @@ class EnvEOM_Task_Trim(object):
 
     def step(self, action):
         # propagate system
-        action[0] = action[0] * 2 - 1 # normalize (0,1) to (-1,1) for VBS
-        action = np.array([action[0], 0.1])
-        t, state = self.env.step(action)
+        # action[0] = action[0] * 2 - 1 # normalize (0,1) to (-1,1) for VBS
+        action_6d = np.array([0., 0., 0., 0., 0.1, action[0]]) #rpm1, rpm2, de, dr, lcg, vbs
+        t, state = self.env.step(action_6d)
 
-        state_2d = np.array([-state[1], state[4]]) # z, w
+        state_2d = np.array([state[2], state[8]]) # z, w
         reward = self._calculate_reward(state_2d, self.current_setpoint)
         # done = self._is_done(state, self.current_setpoint)
         done = False
@@ -228,7 +265,7 @@ class EnvEOM_Task_Trim(object):
     def get_observation(self):
         """Return state"""
         state = self.env.get_state()
-        state_2d = np.array([-state[1], state[4]]) # z, w
+        state_2d = np.array([state[2], state[8]]) # z, w
         return state_2d
 
     def reset(self):
@@ -236,7 +273,7 @@ class EnvEOM_Task_Trim(object):
         return self.get_observation()
 
     def _calculate_reward(self, state, target):
-        error = np.power(state[0] - target[0], 2)
+        error = np.power(state[0] - target[2], 2)
         return -error
 
     def _is_done(self, state, target):
@@ -246,12 +283,35 @@ class EnvEOM_Task_Trim(object):
 
 
 if __name__ == '__main__':
-    init_state = np.array([0., -10., 0.1, 0., 0., 0.]) # x, z, theta, u, w, q
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+
+    np.set_printoptions(precision=2, suppress=True)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    # init_state = np.array([0., -10., 0.1, 0., 0., 0.]) # x, z, theta, u, w, q
+    init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
+
     env = EnvEOM(init_state)
 
-    action = np.array([-1, 0.0]) # vbs, lcg
+    action_6d = np.array([0.1, 0.1, 0., 1., 0., 0.]) #rpm1, rpm2, de, dr, lcg, vbs
 
-    for i in range(200):
-        t, x = env.step(action)
+    error = 0   # max 31.5k for 400 timesteps (80s sim)
+    ts = 3000
+    traj = np.zeros([ts, 12])
+    for i in range(ts):
+        t, x = env.step(action_6d)
+        error += -np.power(x[2] - 5., 2)
+        print(f't = {t.round(2)}   x = {x.round(3)}   error = {error:.2f}')
+        traj[i] = x # save for plots
 
-        print(f't = {t.round(2)}   x = {x.round(3)}')
+    ax.plot(traj[:,0], traj[:,1], traj[:,2], 'k-', label='sim')
+    ax.plot(traj[:1,0], traj[:1,1], traj[:1,2], 'ko', label=None)
+
+    # format
+    ax.set_xlabel('$x~[m]$')
+    ax.set_ylabel('$y~[m]$')
+    ax.set_zlabel('$z~[m]$')
+    plt.legend()
+    plt.show()
