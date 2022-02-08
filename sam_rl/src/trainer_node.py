@@ -51,8 +51,8 @@ class Trainer(object):
             'cuda:0' if torch.cuda.is_available() else 'cpu')
 
         # Init environment
-        self.env = SAMEnv()
-        # self.env = EnvEOM_Task_Trim()
+        # self.env = SAMEnv()
+        self.env = EnvEOM_Task_Trim()
 
         # Learning parameters
         self.actor_lr = 0.001
@@ -61,15 +61,15 @@ class Trainer(object):
         self.discount = 0.99
         self.replay_buffer_max_size = int(5e5)
         self.batch_size = 128
-        self.std_dev = 5 * np.ones(self.env.action_dim)
-        # self.std_dev = 0.1 * np.ones(self.env.action_dim)
+        # self.std_dev = 5 * np.ones(self.env.action_dim)   # for stonefish
+        self.std_dev = 0.1 * np.ones(self.env.action_dim)   # for eom sim
 
         self.expl_noise = OUActionNoise(mean=np.zeros(
             self.env.action_dim), std_deviation=self.std_dev)
 
-        self.train_epoch = 2000
+        self.train_epoch = 1000
         # self.max_timesteps = 6000  # per epoch
-        self.max_timesteps = 600  # per epoch
+        self.max_timesteps = 300  # per epoch
 
         # Init RL agent
         self.agent = DDPGAgent(state_dim=self.env.state_dim,
@@ -93,7 +93,8 @@ class Trainer(object):
             os.makedirs(self.path_dir)
 
         agent_dir = self.path_dir + '/model/'
-        model_name = f'16.24.08-02.07.2022'
+        # model_name = f'16.24.08-02.07.2022222'
+        model_name = f'11.14.44-02.08.2022'
 
         self.model_path = agent_dir + model_name
         if os.path.exists(self.model_path + '_critic'):
@@ -103,8 +104,8 @@ class Trainer(object):
             self.last_episode = 474
         else:
             rospy.loginfo('No model found. Training from the beginning...')
-            start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
-            self.model_path = agent_dir + start_time
+            self.start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
+            self.model_path = agent_dir + self.start_time
             self.last_episode = -1
 
         # Set up tensorboard logging
@@ -129,8 +130,8 @@ class Trainer(object):
             done = False
 
             # for plots
-            actions = np.zeros(self.max_timesteps)
-            state_z = np.zeros(self.max_timesteps)
+            actions = np.zeros([self.max_timesteps, 2])
+            states = np.zeros([self.max_timesteps, 6])
             t = np.linspace(0,self.max_timesteps,self.max_timesteps).astype(int)
 
             ts = 0
@@ -138,15 +139,16 @@ class Trainer(object):
                 # Calculate action
                 action = self.agent.select_action(state)
                 action += self.expl_noise()  # exploration
-                # rospy.loginfo_throttle(0.1, action)
                 np.clip(action, -1, 1, out=action)
 
                 # for plots
                 actions[ts] = action
-                state_z[ts] = state[0]
+                states[ts] = state
 
                 # Make action
-                next_state, reward, done = self.env.step(action)
+                lcg, vbs = action
+                action_6d = np.array([0., 0., 0., 0., lcg, vbs])
+                next_state, reward, done = self.env.step(action_6d)
 
                 # Record it
                 self.replay_buffer.add(
@@ -176,10 +178,15 @@ class Trainer(object):
                 if not os.path.exists(plot_dir):
                     os.makedirs(plot_dir)
 
-                fig, axs = plt.subplots(2)
+                fig, axs = plt.subplots(3)
                 axs[0].set_ylim([-1.1, 1.1])
-                axs[0].plot(t, actions)
-                axs[1].plot(t, state_z)
+                axs[2].set_ylim([-1.6, 1.6])
+                axs[0].plot(t, actions, label = ['lcg', 'vbs']) # lcg, vbs
+                axs[1].plot(t, states[:,1], label = 'z') # z
+                axs[2].plot(t, states[:,2], label = 'theta') # theta
+                axs[0].legend()
+                axs[1].legend()
+                axs[2].legend()
                 plt.savefig(plot_dir + f'{epoch}')
 
 
@@ -190,8 +197,8 @@ class Trainer(object):
         test_epochs = 10
         for epoch in range(0, test_epochs):
             # for plots
-            actions = np.zeros(self.max_timesteps)
-            state_z = np.zeros(self.max_timesteps)
+            actions = np.zeros([self.max_timesteps, 2])
+            states = np.zeros([self.max_timesteps, 6])
             t = np.linspace(0,self.max_timesteps,self.max_timesteps).astype(int)
 
             state = self.env.reset()  # it should reset to initial state here
@@ -211,10 +218,13 @@ class Trainer(object):
                 # np.clip(action, 0, 100, out=action)
 
                 actions[ts] = action
-                state_z[ts] = state[0]
+                states[ts] = state
 
                 # Make action
-                next_state, reward, done = self.env.step(action)
+                lcg, vbs = action
+                action_6d = np.array([0., 0., 0., 0., lcg, vbs])
+                next_state, reward, done = self.env.step(action_6d)
+
                 state = next_state
                 epoch_reward += reward
 
@@ -232,10 +242,15 @@ class Trainer(object):
             if not os.path.exists(plot_dir):
                 os.makedirs(plot_dir)
 
-            fig, axs = plt.subplots(2)
+            fig, axs = plt.subplots(3)
             axs[0].set_ylim([-1.1, 1.1])
-            axs[0].plot(t, actions)
-            axs[1].plot(t, state_z)
+            axs[2].set_ylim([-1.6, 1.6])
+            axs[0].plot(t, actions, label = ['lcg', 'vbs']) # lcg, vbs
+            axs[1].plot(t, states[:,1], label = 'z') # z
+            axs[2].plot(t, states[:,2], label = 'theta') # theta
+            axs[0].legend()
+            axs[1].legend()
+            axs[2].legend()
             plt.savefig(plot_dir + f'{epoch}')
 
 

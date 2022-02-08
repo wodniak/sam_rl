@@ -72,10 +72,10 @@ def skew(vec):
 class EnvEOM(object):
     """
     Simplified numerical simulation of SAM for trim control
-    State : (x, z, theta, u, w, q)
-        @note : Z axis point UP, invert 'z' for being consistend with NED frame
-    Action : (vbs, lcg)
-        @note : vbs and lcg are in range (-1, 1)
+    State : (1 x 12) (x, y, z, phi, theta, psi, u, v, w, p, q, r)
+        @note : xyz in NED frame
+    Action : (1 x 6) (rpm1, rpm2, de, dr, lcg, vbs)
+        @note : values are in different ranges, scaled in eom function
     """
     def __init__(self, init_state):
         self.timestep = 0.0
@@ -87,9 +87,13 @@ class EnvEOM(object):
         self.solver_method='DOP853'
 
         self.current_x = init_state
+        assert self.current_x.shape == (12,), self.current_x
 
     def eom(self, state, control):
-        """Nonlinear dynamics model function"""
+        """
+        Nonlinear dynamics model function
+        @param control: Action in range (-1, 1)
+        """
         # state and control
         x, y, z, phi, theta, psi, u, v, w, p, q, r = state
         rpm1, rpm2, de, dr, lcg, vbs = control
@@ -242,43 +246,72 @@ class EnvEOM_Task_Trim(object):
     def __init__(self):
         # self.init_state = np.array([0., 0.2, 0.18, 0., 0., 0.]) # x, z, theta, u, w, q
         self.init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
+        self.prev_action = []
         self.env = EnvEOM(self.init_state)
 
-        self.current_setpoint = np.array([0., 0., 5.0, 0.15, 0.1, 0., 0., 0., 0., 0., 0., 0.])
+        self.state_dim = 6 # x, z, theta, u, w, q
+        self.action_dim = 2  # lcg, vbs
+        self.max_action = np.array([1, 1])  # max LCG = 1, max VBS = 1
 
-        self.state_dim = 2
-        self.action_dim = 1  # VBS
-        self.max_action = np.array([1])  # max LCG = 1, max VBS = 1
+        self.setpoint_6d = np.array([0., 5.0, 0.3, 0., 0., 0.])    # (x, z, theta, u, w, q)
 
-    def step(self, action):
+    def step(self, action : np.array):
+        """
+        @param action : np.array (1 x 6) : (rpm1, rpm2, de, dr, lcg, vbs)
+                        every action is in range (-1, 1) and scaled appropriately in the EnvEOM.eom
+        """
         # propagate system
-        # action[0] = action[0] * 2 - 1 # normalize (0,1) to (-1,1) for VBS
-        action_6d = np.array([0., 0., 0., 0., 0.1, action[0]]) #rpm1, rpm2, de, dr, lcg, vbs
-        t, state = self.env.step(action_6d)
+        t, state = self.env.step(action)
+        self.prev_action = action
 
-        state_2d = np.array([state[2], state[8]]) # z, w
-        reward = self._calculate_reward(state_2d, self.current_setpoint)
-        # done = self._is_done(state, self.current_setpoint)
+        state_6d = self.get_observation() # temporary 6d for full trim test
+        reward = self._calculate_reward(state_6d, self.setpoint_6d, action)
+        # done = self._is_done(state_6d, self.setpoint_6d)
         done = False
-        return state_2d, reward, done
+        return state_6d, reward, done
 
     def get_observation(self):
-        """Return state"""
-        state = self.env.get_state()
-        state_2d = np.array([state[2], state[8]]) # z, w
-        return state_2d
+        """
+        @return state (1 x 6) : (x, z, theta, u, w, q)
+        """
+        state = self.env.get_state() # get full state 12d
+        # 12d - x, y, z, phi, theta, psi, u, v, w, p, q, r
+        x = state[0]
+        z = state[2]
+        theta = state[4]
+        u = state[6]
+        w = state[8]
+        q = state[10]
+        state_6d = np.array([x, z, theta, u, w, q])
+        return state_6d
 
     def reset(self):
         self.env.set_state(self.init_state)
         return self.get_observation()
 
-    def _calculate_reward(self, state, target):
-        error = np.power(state[0] - target[2], 2)
-        return -error
+    def _calculate_reward(self, state, target, action):
+        """
+        @param state (1 x 6) (x, z, theta, u, w, q)
+        @param target (1 x 6)
+        """
+        Q = np.diag([0., 1000., 1000., 0., 1000., 0.])  # weights on states - z, theta, w
+        R = np.diag([0., 0., 0., 0., 10., 10.]) # weights on controls - lcg, vbs
+
+        s_diff = state - target
+        a_diff = action - self.prev_action
+
+        e_s = np.linalg.norm(s_diff * Q * s_diff) # error on state
+        e_a = np.linalg.norm(action * R * action) # error on actions
+        e_r = np.linalg.norm(a_diff * R * a_diff) # error on action rates
+        return -(e_s + e_a + e_r)
 
     def _is_done(self, state, target):
-        eps = 1e-3
-        return np.isclose(state[1], target[1], rtol=eps)
+        """
+        @param state (1 x 6)
+        @param target (1 x 6)
+        """
+        eps = 1e-2
+        return np.isclose(state, target, rtol=eps)
 
 
 
@@ -290,9 +323,7 @@ if __name__ == '__main__':
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    # init_state = np.array([0., -10., 0.1, 0., 0., 0.]) # x, z, theta, u, w, q
     init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
-
     env = EnvEOM(init_state)
 
     action_6d = np.array([0.1, 0.1, 0., 1., 0., 0.]) #rpm1, rpm2, de, dr, lcg, vbs
