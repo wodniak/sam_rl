@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 from agents.agent_ddpg import DDPGAgent, ReplayBuffer, OUActionNoise
 from env.env_stonefish import SAMEnv
-from env.env_eom import EnvEOM_Task_Trim
+from env.env_eom import EnvEOM_Task_Trim, EnvEOM_Task_XY
 
 # ROS
 import rospy
@@ -44,6 +44,66 @@ from sam_msgs.msg import ThrusterAngles, PercentStamped
 from std_msgs.msg import Float64, Header, Bool
 
 
+def plot_trim(epoch, plot_dir, t, states, actions):
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+
+    fig, axs = plt.subplots(3)
+    axs[0].set_ylim([-1.1, 1.1])
+    # axs[1].set_ylim([-5, 10])
+    axs[2].set_ylim([-1.6, 1.6])
+    axs[0].plot(t, actions, label = ['lcg', 'vbs']) # lcg, vbs
+    axs[1].plot(t, states[:,1], label = 'z') # z
+    axs[2].plot(t, states[:,2], label = 'theta') # theta
+    axs[0].legend()
+    axs[1].legend()
+    axs[2].legend()
+    plt.savefig(plot_dir + f'{epoch}')
+
+def plot_xy(epoch, plot_dir, t, states, actions):
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+
+    fig, axs = plt.subplots(3)
+    axs[0].set_ylim([-1.1, 1.1])
+    # axs[1].set_ylim([-5, 10])
+    # axs[2].set_ylim([-1.6, 1.6])
+    axs[0].plot(t, actions, label = ['rpm', 'dr']) # rpm, dr
+    axs[1].plot(t, states[:,0:2], label = ['x', 'y']) # x, y
+    axs[2].plot(t, states[:,2], label = 'psi') # psi
+    axs[0].legend()
+    axs[1].legend()
+    axs[2].legend()
+    plt.savefig(plot_dir + f'{epoch}')
+
+def plot_traj_2d(epoch, plot_dir, states):
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    ax.plot(states[:,0], states[:,1], 'k-', label='sim')
+    ax.plot(states[:1,0], states[:1,1], 'ko', label=None)
+
+    # format
+    ax.set_xlabel('$x~[m]$')
+    ax.set_ylabel('$y~[m]$')
+    plt.legend()
+    plt.savefig(plot_dir + f'traj_2d_{epoch}')
+
+def plot_traj_3d(epoch, plot_dir, states):
+    fig = plt.figure()
+    ax = fig.add_subplot(1, projection='3d')
+
+    ax.plot(traj[:,0], traj[:,1], traj[:,2], 'k-', label='sim')
+    ax.plot(traj[:1,0], traj[:1,1], traj[:1,2], 'ko', label=None)
+
+    # format
+    ax.set_xlabel('$x~[m]$')
+    ax.set_ylabel('$y~[m]$')
+    ax.set_zlabel('$z~[m]$')
+    plt.legend()
+    plt.savefig(plot_dir + f'traj_3d_{epoch}')
+
+
 class Trainer(object):
     def __init__(self, node_name):
         # Parameters
@@ -53,6 +113,7 @@ class Trainer(object):
         # Init environment
         # self.env = SAMEnv()
         self.env = EnvEOM_Task_Trim()
+        self.env = EnvEOM_Task_XY()
 
         # Learning parameters
         self.actor_lr = 0.001
@@ -93,8 +154,9 @@ class Trainer(object):
             os.makedirs(self.path_dir)
 
         agent_dir = self.path_dir + '/model/'
-        # model_name = f'16.24.08-02.07.2022222'
-        model_name = f'11.14.44-02.08.2022'
+        # model_name = f'16.24.08-02.07.2022222' # 1d trim from yesterday
+        # model_name = f'13.42.11-02.08.2022'  # latest trim
+        model_name = f'15.59.33-02.08.2022'  # latest xy
 
         self.model_path = agent_dir + model_name
         if os.path.exists(self.model_path + '_critic'):
@@ -146,8 +208,10 @@ class Trainer(object):
                 states[ts] = state
 
                 # Make action
-                lcg, vbs = action
-                action_6d = np.array([0., 0., 0., 0., lcg, vbs])
+                # lcg, vbs = action
+                # action_6d = np.array([0., 0., 0., 0., lcg, vbs])
+                rpm, dr = action
+                action_6d = np.array([rpm, rpm, 0., dr, 0., 0.])
                 next_state, reward, done = self.env.step(action_6d)
 
                 # Record it
@@ -175,20 +239,8 @@ class Trainer(object):
 
                 # visualize actions and Z
                 plot_dir = self.path_dir + '/plots/train/'
-                if not os.path.exists(plot_dir):
-                    os.makedirs(plot_dir)
-
-                fig, axs = plt.subplots(3)
-                axs[0].set_ylim([-1.1, 1.1])
-                axs[2].set_ylim([-1.6, 1.6])
-                axs[0].plot(t, actions, label = ['lcg', 'vbs']) # lcg, vbs
-                axs[1].plot(t, states[:,1], label = 'z') # z
-                axs[2].plot(t, states[:,2], label = 'theta') # theta
-                axs[0].legend()
-                axs[1].legend()
-                axs[2].legend()
-                plt.savefig(plot_dir + f'{epoch}')
-
+                # plot_trim(epoch, plot_dir, t, states, actions)
+                plot_xy(epoch, plot_dir, t, states, actions)
 
     def test(self):
         evaluations = []
@@ -221,8 +273,10 @@ class Trainer(object):
                 states[ts] = state
 
                 # Make action
-                lcg, vbs = action
-                action_6d = np.array([0., 0., 0., 0., lcg, vbs])
+                # lcg, vbs = action
+                # action_6d = np.array([0., 0., 0., 0., lcg, vbs])
+                rpm, dr = action
+                action_6d = np.array([rpm, rpm, 0., dr, 0., 0.])
                 next_state, reward, done = self.env.step(action_6d)
 
                 state = next_state
@@ -242,18 +296,9 @@ class Trainer(object):
             if not os.path.exists(plot_dir):
                 os.makedirs(plot_dir)
 
-            fig, axs = plt.subplots(3)
-            axs[0].set_ylim([-1.1, 1.1])
-            axs[2].set_ylim([-1.6, 1.6])
-            axs[0].plot(t, actions, label = ['lcg', 'vbs']) # lcg, vbs
-            axs[1].plot(t, states[:,1], label = 'z') # z
-            axs[2].plot(t, states[:,2], label = 'theta') # theta
-            axs[0].legend()
-            axs[1].legend()
-            axs[2].legend()
-            plt.savefig(plot_dir + f'{epoch}')
-
-
+            # plot_trim(epoch, plot_dir, t, states, actions)
+            plot_xy(epoch, plot_dir, t, states, actions)
+            plot_traj_2d(epoch, plot_dir, states)
 
 if __name__ == "__main__":
     rospy.init_node("rl_trainer")

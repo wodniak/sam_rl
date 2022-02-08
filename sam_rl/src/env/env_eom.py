@@ -242,6 +242,7 @@ class EnvEOM(object):
 class EnvEOM_Task_Trim(object):
     """
     Define common API to env and cost function for the task
+    Learns to control trim (depth and pitch angle)
     """
     def __init__(self):
         # self.init_state = np.array([0., 0.2, 0.18, 0., 0., 0.]) # x, z, theta, u, w, q
@@ -257,7 +258,7 @@ class EnvEOM_Task_Trim(object):
 
     def step(self, action : np.array):
         """
-        @param action : np.array (1 x 6) : (rpm1, rpm2, de, dr, lcg, vbs)
+        @param action : np.array (6 x 1) : (rpm1, rpm2, de, dr, lcg, vbs)
                         every action is in range (-1, 1) and scaled appropriately in the EnvEOM.eom
         """
         # propagate system
@@ -272,7 +273,7 @@ class EnvEOM_Task_Trim(object):
 
     def get_observation(self):
         """
-        @return state (1 x 6) : (x, z, theta, u, w, q)
+        @return state (6 x 1) : (x, z, theta, u, w, q)
         """
         state = self.env.get_state() # get full state 12d
         # 12d - x, y, z, phi, theta, psi, u, v, w, p, q, r
@@ -291,10 +292,10 @@ class EnvEOM_Task_Trim(object):
 
     def _calculate_reward(self, state, target, action):
         """
-        @param state (1 x 6) (x, z, theta, u, w, q)
-        @param target (1 x 6)
+        @param state (6 x 1) (x, z, theta, u, w, q)
+        @param target (6 x 1)
         """
-        Q = np.diag([0., 1000., 1000., 0., 1000., 0.])  # weights on states - z, theta, w
+        Q = np.diag([0., 10., 1000., 0., 1000., 0.])  # weights on states - z, theta, w
         R = np.diag([0., 0., 0., 0., 10., 10.]) # weights on controls - lcg, vbs
 
         s_diff = state - target
@@ -307,12 +308,87 @@ class EnvEOM_Task_Trim(object):
 
     def _is_done(self, state, target):
         """
-        @param state (1 x 6)
-        @param target (1 x 6)
+        @param state (6 x 1)
+        @param target (6 x 1)
         """
         eps = 1e-2
         return np.isclose(state, target, rtol=eps)
 
+
+class EnvEOM_Task_XY(object):
+    """
+    Define common API to env and cost function for the task
+    Learns to control RPM and DR to go to point in XY plane
+    """
+    def __init__(self):
+        # x, y, z, phi, theta, psi, u, v, w, p, q, r
+        self.init_state = np.array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+        self.prev_action = []
+        self.env = EnvEOM(self.init_state)
+
+        self.state_dim = 6 # x, y, psi, u, v, r
+        self.action_dim = 2  # rpm (both), dr
+        self.max_action = np.array([1, 1])  # max rpm = 1, max dr = 1
+
+        self.setpoint_6d = np.array([50., 0.0, 0.0, 0., 0., 0.])    # x, y, psi, u, v, r
+
+    def step(self, action : np.array):
+        """
+        @param action : np.array (6 x 1) : (rpm1, rpm2, de, dr, lcg, vbs)
+                        every action is in range (-1, 1) and scaled appropriately in the EnvEOM.eom
+        """
+        # propagate system
+        t, state = self.env.step(action)
+        self.prev_action = action
+
+        state_6d = self.get_observation() # temporary 6d for full trim test
+        reward = self._calculate_reward(state_6d, self.setpoint_6d, action)
+        # done = self._is_done(state_6d, self.setpoint_6d)
+        done = False
+        return state_6d, reward, done
+
+    def get_observation(self):
+        """
+        @return state (6 x 1) : (x, z, theta, u, w, q)
+        """
+        state = self.env.get_state() # get full state 12d
+        # 12d - x, y, z, phi, theta, psi, u, v, w, p, q, r
+        x = state[0]
+        y = state[1]
+        psi = state[5]
+        u = state[6]
+        v = state[7]
+        r = state[11]
+        state_6d = np.array([x, y, psi, u, v, r])
+        return state_6d
+
+    def reset(self):
+        self.env.set_state(self.init_state)
+        return self.get_observation()
+
+    def _calculate_reward(self, state, target, action):
+        """
+        @param state (6 x 1) (x, y, psi, u, v, r)
+        @param target (6 x 1)
+        """
+        Q = np.diag([100., 100., 100., 100., 100., 100.])  # weights on states
+        R = np.diag([10., 10., 0., 10., 0., 0.]) # weights on controls - rpm, dr
+
+        s_diff = state - target
+        a_diff = action - self.prev_action
+
+        e_s = np.linalg.norm(s_diff * Q * s_diff) # error on state
+        e_a = np.linalg.norm(action * R * action) # error on actions
+        e_r = np.linalg.norm(a_diff * R * a_diff) # error on action rates
+        return -(e_s + e_a + e_r)
+
+    def _is_done(self, state, target):
+        """
+        @param state (6 x 1)
+        @param target (6 x 1)
+        """
+        eps = 1e-2
+        return np.isclose(state, target, rtol=eps)
 
 
 if __name__ == '__main__':
@@ -326,10 +402,10 @@ if __name__ == '__main__':
     init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
     env = EnvEOM(init_state)
 
-    action_6d = np.array([0.1, 0.1, 0., 1., 0., 0.]) #rpm1, rpm2, de, dr, lcg, vbs
+    action_6d = np.array([0.1, 0.1, 0., 1, 0., 0.]) #rpm1, rpm2, de, dr, lcg, vbs
 
     error = 0   # max 31.5k for 400 timesteps (80s sim)
-    ts = 3000
+    ts = 1000
     traj = np.zeros([ts, 12])
     for i in range(ts):
         t, x = env.step(action_6d)
