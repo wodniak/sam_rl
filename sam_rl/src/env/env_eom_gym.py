@@ -25,8 +25,11 @@
 
 import math
 import numpy as np
+import gym
+import random
 
 from scipy.integrate import solve_ivp
+from typing import Optional
 
 def T_b2ned(phi, theta, psi):
     T = np.array([
@@ -239,187 +242,88 @@ class EnvEOM(object):
         self.current_x = state
 
 
-class EnvEOM_Task_Trim(object):
+class EnvEOMGym(gym.Env):
     """
     Define common API to env and cost function for the task
     Learns to control trim (depth and pitch angle)
     """
     def __init__(self):
-        # self.init_state = np.array([0., 0.2, 0.18, 0., 0., 0.]) # x, z, theta, u, w, q
+        super(EnvEOMGym, self).__init__()
+        action_high = np.ones(2)
+        self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
+
+        # x, y, z, phi, theta, psi, u, v, w, p, q, r
+        # obs_high = np.array([200.0, 200.0, 200.0,
+        #                     1.58, 1.58, 1.58,
+        #                     10.0, 10.0, 10.0,
+        #                     10.0, 10.0, 10.0])
+        # (x, z, theta, u, w, q)
+        obs_high = np.array([200.0, 200.0,
+                            1.58,
+                            10.0, 10.0,
+                            10.0])
+        self.observation_space = gym.spaces.Box(low=-obs_high, high=obs_high)
+        self.ep_length = 300
+        self.current_step = 0
+        self.num_resets = 0
+
+        # For logger
+        self.reward = 0
+        self.state = np.zeros(6)
+
+        # EOM simulation
         self.init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        self.prev_action = []
+        self.prev_action = np.zeros(2)
+        self.setpoint_6d = np.array([0., 5.0, 0.3, 0., 0., 0.])    # (x, z, theta, u, w, q)
         self.env = EnvEOM(self.init_state)
 
-        self.state_dim = 6 # x, z, theta, u, w, q
-        self.action_dim = 2  # lcg, vbs
-        self.max_action = np.array([1, 1])  # max LCG = 1, max VBS = 1
+    def step(self, action):
+        action_6d = np.array([0., 0., 0., 0., action[0], action[1]])
+        t, state = self.env.step(action_6d) # 12d
 
-        self.setpoint_6d = np.array([0., 5.0, 0.3, 0., 0., 0.])    # (x, z, theta, u, w, q)
+        self.state = self._get_obs() # get 6d
+        self.reward = self._calculate_reward(self.state, self.setpoint_6d, action)
 
-    def step(self, action : np.array):
-        """
-        @param action : np.array (6 x 1) : (rpm1, rpm2, de, dr, lcg, vbs)
-                        every action is in range (-1, 1) and scaled appropriately in the EnvEOM.eom
-        """
-        # propagate system
-        t, state = self.env.step(action)
         self.prev_action = action
 
-        state_6d = self.get_observation() # temporary 6d for full trim test
-        reward = self._calculate_reward(state_6d, self.setpoint_6d, action)
-        # done = self._is_done(state_6d, self.setpoint_6d)
-        done = False
-        return state_6d, reward, done
+        self.current_step += 1
+        done = self.current_step >= self.ep_length
+        return self.state, self.reward, done, {}
 
-    def get_observation(self):
-        """
-        @return state (6 x 1) : (x, z, theta, u, w, q)
-        """
-        state = self.env.get_state() # get full state 12d
-        # 12d - x, y, z, phi, theta, psi, u, v, w, p, q, r
+    def reset(self):
+        self.current_step = 0
+        self.num_resets += 1
+        self.env.set_state(self.init_state)
+        return self._get_obs()
+
+    def render(self, mode="human"):
+        pass
+
+    def close(self):
+        pass
+
+    def _get_obs(self):
+        state = self.env.get_state()
         x = state[0]
         z = state[2]
         theta = state[4]
         u = state[6]
         w = state[8]
         q = state[10]
-        state_6d = np.array([x, z, theta, u, w, q])
-        return state_6d
-
-    def reset(self):
-        self.env.set_state(self.init_state)
-        return self.get_observation()
+        state = np.array([x, z, theta, u, w, q])
+        return state
 
     def _calculate_reward(self, state, target, action):
-        """
-        @param state (6 x 1) (x, z, theta, u, w, q)
-        @param target (6 x 1)
-        """
+
         Q = np.diag([0., 100., 100., 0., 100., 0.])  # weights on states - z, theta, w
-        R = np.diag([0., 0., 0., 0., 10., 10.]) # weights on controls - lcg, vbs
-        Rr = np.diag([0., 0., 0., 0., 1000., 1000.])
+        R = np.diag([10., 10.]) # weights on controls - lcg, vbs
+        R_r = np.diag([100., 100.]) # weights on rates - lcg, vbs
 
         s_diff = state - target
         a_diff = action - self.prev_action
 
         e_s = np.linalg.norm(s_diff * Q * s_diff) # error on state
         e_a = np.linalg.norm(action * R * action) # error on actions
-        e_r = np.linalg.norm(a_diff * R * a_diff) # error on action rates
+        e_r = np.linalg.norm(a_diff * R_r * a_diff) # error on action rates
         return -(e_s + e_a + e_r)
 
-    def _is_done(self, state, target):
-        """
-        @param state (6 x 1)
-        @param target (6 x 1)
-        """
-        eps = 1e-2
-        return np.isclose(state, target, rtol=eps)
-
-
-class EnvEOM_Task_XY(object):
-    """
-    Define common API to env and cost function for the task
-    Learns to control RPM and DR to go to point in XY plane
-    """
-    def __init__(self):
-        # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        self.init_state = np.array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-        self.prev_action = []
-        self.env = EnvEOM(self.init_state)
-
-        self.state_dim = 6 # x, y, psi, u, v, r
-        self.action_dim = 2  # rpm (both), dr
-        self.max_action = np.array([1, 1])  # max rpm = 1, max dr = 1
-
-        self.setpoint_6d = np.array([50., 0.0, 0.0, 0., 0., 0.])    # x, y, psi, u, v, r
-
-    def step(self, action : np.array):
-        """
-        @param action : np.array (6 x 1) : (rpm1, rpm2, de, dr, lcg, vbs)
-                        every action is in range (-1, 1) and scaled appropriately in the EnvEOM.eom
-        """
-        # propagate system
-        t, state = self.env.step(action)
-        self.prev_action = action
-
-        state_6d = self.get_observation() # temporary 6d for full trim test
-        reward = self._calculate_reward(state_6d, self.setpoint_6d, action)
-        # done = self._is_done(state_6d, self.setpoint_6d)
-        done = False
-        return state_6d, reward, done
-
-    def get_observation(self):
-        """
-        @return state (6 x 1) : (x, z, theta, u, w, q)
-        """
-        state = self.env.get_state() # get full state 12d
-        # 12d - x, y, z, phi, theta, psi, u, v, w, p, q, r
-        x = state[0]
-        y = state[1]
-        psi = state[5]
-        u = state[6]
-        v = state[7]
-        r = state[11]
-        state_6d = np.array([x, y, psi, u, v, r])
-        return state_6d
-
-    def reset(self):
-        self.env.set_state(self.init_state)
-        return self.get_observation()
-
-    def _calculate_reward(self, state, target, action):
-        """
-        @param state (6 x 1) (x, y, psi, u, v, r)
-        @param target (6 x 1)
-        """
-        Q = np.diag([100., 100., 100., 100., 100., 100.])  # weights on states
-        R = np.diag([10., 10., 0., 10., 0., 0.]) # weights on controls - rpm, dr
-
-        s_diff = state - target
-        a_diff = action - self.prev_action
-
-        e_s = np.linalg.norm(s_diff * Q * s_diff) # error on state
-        e_a = np.linalg.norm(action * R * action) # error on actions
-        e_r = np.linalg.norm(a_diff * R * a_diff) # error on action rates
-        return -(e_s + e_a + e_r)
-
-    def _is_done(self, state, target):
-        """
-        @param state (6 x 1)
-        @param target (6 x 1)
-        """
-        eps = 1e-2
-        return np.isclose(state, target, rtol=eps)
-
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
-
-    np.set_printoptions(precision=2, suppress=True)
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
-    env = EnvEOM(init_state)
-
-    action_6d = np.array([0.1, 0.1, 0., 1, 0., 0.]) #rpm1, rpm2, de, dr, lcg, vbs
-
-    error = 0   # max 31.5k for 400 timesteps (80s sim)
-    ts = 1000
-    traj = np.zeros([ts, 12])
-    for i in range(ts):
-        t, x = env.step(action_6d)
-        error += -np.power(x[2] - 5., 2)
-        print(f't = {t.round(2)}   x = {x.round(3)}   error = {error:.2f}')
-        traj[i] = x # save for plots
-
-    ax.plot(traj[:,0], traj[:,1], traj[:,2], 'k-', label='sim')
-    ax.plot(traj[:1,0], traj[:1,1], traj[:1,2], 'ko', label=None)
-
-    # format
-    ax.set_xlabel('$x~[m]$')
-    ax.set_ylabel('$y~[m]$')
-    ax.set_zlabel('$z~[m]$')
-    plt.legend()
-    plt.show()
