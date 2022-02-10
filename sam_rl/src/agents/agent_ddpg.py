@@ -232,3 +232,7 @@ class DDPGAgent(object):
         # Update
         DDPGAgent.soft_update(self.critic, self.critic_target, self.tau)
         DDPGAgent.soft_update(self.actor, self.actor_target, self.tau)
+
+if __name__ == '__main__':
+    actor = Actor(state_dimension=6, action_dimension=2, max_action=1)
+    print(actor)

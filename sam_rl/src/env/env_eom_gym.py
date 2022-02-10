@@ -247,7 +247,7 @@ class EnvEOMGym(gym.Env):
     Define common API to env and cost function for the task
     Learns to control trim (depth and pitch angle)
     """
-    def __init__(self):
+    def __init__(self, num_envs=1):
         super(EnvEOMGym, self).__init__()
         action_high = np.ones(2)
         self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
@@ -266,6 +266,7 @@ class EnvEOMGym(gym.Env):
         self.ep_length = 300
         self.current_step = 0
         self.num_resets = 0
+        self.num_envs = num_envs
 
         # For logger
         self.reward = 0
@@ -314,10 +315,9 @@ class EnvEOMGym(gym.Env):
         return state
 
     def _calculate_reward(self, state, target, action):
-
-        Q = np.diag([0., 100., 100., 0., 100., 0.])  # weights on states - z, theta, w
+        Q = np.diag([0., 1000., 100., 0., 100., 0.])  # weights on states - z, theta, w
         R = np.diag([10., 10.]) # weights on controls - lcg, vbs
-        R_r = np.diag([100., 100.]) # weights on rates - lcg, vbs
+        R_r = np.diag([10., 10.]) # weights on rates - lcg, vbs
 
         s_diff = state - target
         a_diff = action - self.prev_action
