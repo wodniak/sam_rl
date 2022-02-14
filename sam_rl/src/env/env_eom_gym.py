@@ -273,9 +273,10 @@ class EnvEOMGym(gym.Env):
         self.state = np.zeros(6)
 
         # EOM simulation
-        self.init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
+        # self.init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
+        self.init_state = self._reset_uniform()
         self.prev_action = np.zeros(2)
-        self.setpoint_6d = np.array([0., 5.0, 0.3, 0., 0., 0.])    # (x, z, theta, u, w, q)
+        self.setpoint_6d = np.array([0., 0.0, 0.0, 0., 0., 0.])    # (x, z, theta, u, w, q)
         self.env = EnvEOM(self.init_state)
 
     def step(self, action):
@@ -291,10 +292,26 @@ class EnvEOMGym(gym.Env):
         done = self.current_step >= self.ep_length
         return self.state, self.reward, done, {}
 
+    def set_init_state(self, init_state):
+        self.init_state = init_state
+
+    def _reset_uniform(self):
+        xyz = np.random.uniform(-10, 10)
+        rpy = np.random.uniform(-1.57, 1.57)
+        uvw = np.random.uniform(-2, 2)
+        pqr = np.random.uniform(-1, 1)
+
+        # x, y, z, phi, theta, psi, u, v, w, p, q, r
+        state = np.array([0., 0., xyz, 0., rpy, 0., 0., 0., uvw, 0., pqr, 0.])
+        return state
+
     def reset(self):
         self.current_step = 0
         self.num_resets += 1
-        self.env.set_state(self.init_state)
+
+        # state = self.init_state
+        state = self._reset_uniform()
+        self.env.set_state(state)
         return self._get_obs()
 
     def render(self, mode="human"):
@@ -315,9 +332,11 @@ class EnvEOMGym(gym.Env):
         return state
 
     def _calculate_reward(self, state, target, action):
-        Q = np.diag([0., 1000., 100., 0., 100., 0.])  # weights on states - z, theta, w
-        R = np.diag([10., 10.]) # weights on controls - lcg, vbs
-        R_r = np.diag([10., 10.]) # weights on rates - lcg, vbs
+        np.set_printoptions(precision=2, suppress=True)
+
+        Q = np.diag([0., 0.1, 0.3, 0., 0.3, 0.])  # weights on states - z, theta, w
+        R = np.diag([0.03, 0.03]) # weights on controls - lcg, vbs
+        R_r = np.diag([0.3, 0.3]) # weights on rates - lcg, vbs
 
         s_diff = state - target
         a_diff = action - self.prev_action
@@ -325,5 +344,18 @@ class EnvEOMGym(gym.Env):
         e_s = np.linalg.norm(s_diff * Q * s_diff) # error on state
         e_a = np.linalg.norm(action * R * action) # error on actions
         e_r = np.linalg.norm(a_diff * R_r * a_diff) # error on action rates
-        return -(e_s + e_a + e_r)
+        e = (e_s + e_a + e_r)
+        error = np.maximum(0, 1. - e_s) - e_a - e_r
 
+        # print(f'[{self.current_step}] Reward s / a / r / = {e_s/e:.2f} / {e_a/e:.2f} / {e_r/e:.2f} for state {state} and action {action}')
+        return error
+
+
+if __name__ == '__main__':
+    env = EnvEOMGym()
+    target = np.array([0., 0.0, 0.0, 0., 0., 0.])
+    state = np.array([0., 1., 0.0, 0., 0., 0.])
+    action = np.array([0.2, 0.5])
+
+    reward = env._calculate_reward(state, target, action)
+    print(reward)

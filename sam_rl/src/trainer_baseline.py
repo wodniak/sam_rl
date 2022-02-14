@@ -28,6 +28,7 @@ import datetime
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+from torchinfo import summary
 
 from stable_baselines3 import DDPG
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
@@ -67,6 +68,7 @@ class TensorboardCallback(BaseCallback):
         self.print_episode = 20 * n_envs
 
     def _on_rollout_end(self) -> None:
+        self.reward = self.training_env.get_attr("reward")[0] #only last reward
         self.logger.record("reward", self.reward)
 
         if self.episode % self.print_episode == 0:
@@ -77,7 +79,7 @@ class TensorboardCallback(BaseCallback):
         self.episode += 1
 
     def _on_step(self) -> bool:
-        self.reward += self.training_env.get_attr("reward")[0]
+        # self.reward += self.training_env.get_attr("reward")[0]
         ts = self.training_env.get_attr("current_step")[0]
         self.states[ts] = self.training_env.get_attr("state")[0]
         self.actions[ts] = self.training_env.get_attr("prev_action")[0]
@@ -92,9 +94,11 @@ class TensorboardCallback(BaseCallback):
         axs[0].plot(self.t, self.actions, label = ['lcg', 'vbs']) # lcg, vbs
         axs[1].plot(self.t, self.states[:,1], label = 'z') # z
         axs[2].plot(self.t, self.states[:,2], label = 'theta') # theta
-        axs[0].legend()
-        axs[1].legend()
-        axs[2].legend()
+
+        for ax in axs:
+            ax.legend()
+            ax.grid()
+
         self.logger.record(f'trim/{self.episode}', Figure(fig, close=True), exclude=("stdout", "log", "json", "csv"))
         plt.close()
 
@@ -134,7 +138,8 @@ def train():
     action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
 
     # Custom actor/critic architecture
-    policy_kwargs = dict(net_arch=dict(pi=[32, 32], qf=[64, 64, 128]))
+    # policy_kwargs = dict(net_arch=dict(pi=[32, 32], qf=[64, 128, 128]))
+    policy_kwargs = dict(net_arch=dict(pi=[64, 64], qf=[64, 64]))
     model = DDPG(policy="MlpPolicy",
                 env=env,
                 action_noise=action_noise,
@@ -182,9 +187,12 @@ def train():
         deterministic=True
         )
 
-    callback_list = CallbackList([rewards_callback, checkpoint_callback])
+    callback_list = CallbackList([
+        rewards_callback,
+        checkpoint_callback,
+        eval_callback])
 
-    total_ts = ep_length * 500
+    total_ts = ep_length * 800
 
     model.learn(
         total_timesteps=total_ts,
@@ -197,7 +205,7 @@ def train():
     model.save(model_path)
 
 def test():
-    def plot_trim(epoch, plot_dir, t, states, actions):
+    def plot_trim_with_setpoint(epoch, plot_dir, t, states, actions, t_setpoint):
         if not os.path.exists(plot_dir):
             os.makedirs(plot_dir)
 
@@ -207,10 +215,14 @@ def test():
         axs[2].set_ylim([-1.6, 1.6])
         axs[0].plot(t, actions, label = ['lcg', 'vbs']) # lcg, vbs
         axs[1].plot(t, states[:,1], label = 'z') # z
+        axs[1].plot(t, t_setpoint[:,1], 'k--', label = 'z setpoint') # z setpoint
         axs[2].plot(t, states[:,2], label = 'theta') # theta
-        axs[0].legend()
-        axs[1].legend()
-        axs[2].legend()
+        axs[2].plot(t, t_setpoint[:,2], 'k--', label = 'theta setpoint') # theta setpoint
+
+        for ax in axs:
+            ax.legend()
+            ax.grid()
+
         plt.savefig(plot_dir + f'{epoch}')
 
     env = EnvEOMGym()
@@ -218,37 +230,63 @@ def test():
     env = Monitor(env)
     env = DummyVecEnv([lambda: env])
 
-    model_name = '11.47.18-02.10.2022'
+    # model_name = '11.32.05-02.14.2022/ddpg_150000_steps.zip' # red
+    # model_name = '10.41.47-02.14.2022/ddpg_150000_steps.zip' # gray
+    model_name = '13.04.18-02.14.2022/ddpg_30000_steps.zip' # blue
     model_path = model_dir + model_name
     assert os.path.exists(model_path), f'Model {model_path} does not exist.'
     print(f'Loading model {model_path}...')
-    model = DDPG.load(model_path)
+    model = DDPG.load(path=model_path)
+    print(model.policy)
 
     max_episodes = 10
     ep_length = env.get_attr('ep_length', 0)[0]
     action_dim = env.get_attr('action_space', 0)[0].shape[-1]
     state_dim = env.get_attr('observation_space', 0)[0].shape[-1]
 
-    obs = env.reset()
-    for episode in range(max_episodes):
+    #define setpoints
+    setpoints = np.array([
+        [0., 0.0, 0.0, 0., 0., 0.],
+        [0., 5.0, 0.0, 0., 0., 0.],
+        [0., 5.0, 0.5, 0., 0., 0.],
+        [0., -3.0, 0.5, 0., 0., 0.],
+        [0., -3.0, -0.5, 0., 0., 0.],
+        [0., 10.0, 0.0, 0., 0., 0.],
+        [0., -10.0, 0.0, 0., 0., 0.]
+        ])
+
+    for episode in range(setpoints.shape[-1]):
+        # Reset env
+        setpoint = setpoints[episode]
+        obs = env.reset()
+        start_state = obs
+        end_state = obs
+
+        # for plots
         actions = np.zeros([ep_length, action_dim])
         states = np.zeros([ep_length, state_dim])
         t = np.linspace(0, ep_length, ep_length).astype(int)
+
         ep_reward = 0
         for ts in range(ep_length):
-            action, _states = model.predict(obs) # deterministic for DDPG
-            obs, rewards, dones, info = env.step(action)
+            states[ts] = obs    # save
 
-            # save
+            obs -= setpoint     # will follow setpoint
+            action, _states = model.predict(obs) # deterministic for DDPG
+
+            actions[ts] = action    # save
+
+            obs, rewards, dones, info = env.step(action)
+            end_state = obs
             ep_reward += rewards
-            states[ts] = obs
-            actions[ts] = action
 
         # after episode
-        print(f'[{episode}]  reward = {ep_reward}')
+        print(f'[{episode}]  setpoint = {setpoint} start = {start_state} end = {end_state}  reward = {ep_reward}')
+
         plot_test_dir = plot_dir + 'test/'
-        plot_trim(episode, plot_test_dir, t, states, actions)
+        t_setpoint = np.tile(setpoint,(ep_length,1))
+        plot_trim_with_setpoint(episode, plot_test_dir, t, states, actions, t_setpoint)
 
 if __name__ == "__main__":
-    train()
-    # test()
+    # train()
+    test()
