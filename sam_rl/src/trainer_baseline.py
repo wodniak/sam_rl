@@ -27,10 +27,11 @@ import os
 import datetime
 import numpy as np
 import torch
+import argparse
 import matplotlib.pyplot as plt
 from torchinfo import summary
 
-from stable_baselines3 import DDPG
+from stable_baselines3 import DDPG, TD3, SAC, PPO
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, SubprocVecEnv, vec_check_nan
@@ -110,7 +111,7 @@ def make_env(i, seed=0):
     # set_global_seeds(seed)
     return _init
 
-def train():
+def train(model_type : str):
     # Set up tensorboard logging
     start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
     tf_writer_path = tensorboard_logs_dir + start_time
@@ -139,23 +140,67 @@ def train():
 
     # Custom actor/critic architecture
     # policy_kwargs = dict(net_arch=dict(pi=[32, 32], qf=[64, 128, 128]))
-    policy_kwargs = dict(net_arch=dict(pi=[64, 64], qf=[64, 64]))
-    model = DDPG(policy="MlpPolicy",
-                env=env,
-                action_noise=action_noise,
-                verbose=1,
-                learning_rate=0.001,
-                buffer_size=int(1e6),
-                learning_starts=128,
-                batch_size=128,
-                tau=0.005,
-                gamma=0.99,
-                tensorboard_log=tf_writer_path,
-                device='auto',
-                policy_kwargs=policy_kwargs
-                # train_freq=5,
-                # gradient_steps=-1
-                )
+    policy_kwargs = dict(net_arch=dict(pi=[64, 64], qf=[64, 64])) # for off-policy only
+
+    if model_type == 'ddpg':
+        model = DDPG(policy="MlpPolicy",
+                    env=env,
+                    action_noise=action_noise,
+                    verbose=1,
+                    learning_rate=0.001,
+                    buffer_size=int(1e6),
+                    learning_starts=128,
+                    batch_size=128,
+                    tau=0.005,
+                    gamma=0.99,
+                    tensorboard_log=tf_writer_path,
+                    device='auto',
+                    policy_kwargs=policy_kwargs
+                    # train_freq=5,
+                    # gradient_steps=-1
+                    )
+    elif model_type == 'td3':
+        model = TD3(policy="MlpPolicy",
+            env=env,
+            action_noise=action_noise,
+            verbose=1,
+            learning_rate=0.001,
+            buffer_size=int(1e6),
+            learning_starts=128,
+            batch_size=128,
+            tau=0.005,
+            gamma=0.99,
+            tensorboard_log=tf_writer_path,
+            device='auto',
+            policy_kwargs=policy_kwargs
+            # train_freq=5,
+            # gradient_steps=-1
+            )
+    elif model_type == 'sac':
+        model = SAC(policy="MlpPolicy",
+            env=env,
+            action_noise=action_noise,
+            verbose=1,
+            learning_rate=0.001,
+            buffer_size=int(1e6),
+            learning_starts=128,
+            batch_size=128,
+            tau=0.005,
+            gamma=0.99,
+            tensorboard_log=tf_writer_path,
+            device='auto',
+            policy_kwargs=policy_kwargs
+            # train_freq=5,
+            # gradient_steps=-1
+            )
+    elif model_type == 'ppo':
+        policy_kwargs = dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])]) # for on-policy only
+        model = PPO(policy="MlpPolicy",
+            env=env,
+            tensorboard_log=tf_writer_path,
+            policy_kwargs=policy_kwargs,
+            verbose=1
+            )
 
     print('Starting learning...')
     # action_dim=env.envs[0].action_space.shape[-1]
@@ -177,7 +222,7 @@ def train():
     checkpoint_callback = CheckpointCallback(
         save_freq=max(ep_length*100 // num_cpu, 1),
         save_path=model_path,
-        name_prefix='ddpg')
+        name_prefix=model_type)
 
     eval_callback = EvalCallback(
         eval_env,
@@ -204,8 +249,8 @@ def train():
     # model.learn(total_timesteps=total_ts)
     model.save(model_path)
 
-def test():
-    def plot_trim_with_setpoint(epoch, plot_dir, t, states, actions, t_setpoint):
+def test(model_type : str):
+    def plot_trim_with_setpoint(title : str, epoch, plot_dir : str, t, states, actions, t_setpoint):
         if not os.path.exists(plot_dir):
             os.makedirs(plot_dir)
 
@@ -223,6 +268,7 @@ def test():
             ax.legend()
             ax.grid()
 
+        fig.suptitle(title)
         plt.savefig(plot_dir + f'{epoch}')
 
     env = EnvEOMGym()
@@ -230,13 +276,25 @@ def test():
     env = Monitor(env)
     env = DummyVecEnv([lambda: env])
 
-    # model_name = '11.32.05-02.14.2022/ddpg_150000_steps.zip' # red
-    # model_name = '10.41.47-02.14.2022/ddpg_150000_steps.zip' # gray
-    model_name = '13.04.18-02.14.2022/ddpg_30000_steps.zip' # blue
+    # model_name = '11.32.05-02.14.2022/ddpg_150000_steps.zip' # red ddpg
+    # model_name = '10.41.47-02.14.2022/ddpg_150000_steps.zip' # gray ddpg
+
+    # model_name = '13.04.18-02.14.2022/ddpg_240000_steps.zip' # blue ddpg
+    model_name = '14.30.02-02.14.2022/ddpg_120000_steps.zip' # blue sac
+    # model_name = '14.29.22-02.14.2022/ddpg_240000_steps.zip' # red td3
+    # model_name = '14.59.37-02.14.2022/ddpg_240000_steps.zip' # pink ppo
+
     model_path = model_dir + model_name
     assert os.path.exists(model_path), f'Model {model_path} does not exist.'
     print(f'Loading model {model_path}...')
-    model = DDPG.load(path=model_path)
+    if model_type == 'ddpg':
+        model = DDPG.load(path=model_path)
+    elif model_type == 'td3':
+        model = TD3.load(path=model_path)
+    elif model_type == 'sac':
+        model = SAC.load(path=model_path)
+    elif model_type == 'ppo':
+        model = PPO.load(path=model_path)
     print(model.policy)
 
     max_episodes = 10
@@ -285,8 +343,22 @@ def test():
 
         plot_test_dir = plot_dir + 'test/'
         t_setpoint = np.tile(setpoint,(ep_length,1))
-        plot_trim_with_setpoint(episode, plot_test_dir, t, states, actions, t_setpoint)
+        title = f'{model_type}:{model_name}'
+        plot_trim_with_setpoint(title, episode, plot_test_dir, t, states, actions, t_setpoint)
 
 if __name__ == "__main__":
-    # train()
-    test()
+    parser = argparse.ArgumentParser(description='SAM RL')
+    parser.add_argument('--model',
+        dest='model',
+        type=str,
+        nargs='?',
+        required=True,
+        choices=['ddpg', 'td3', 'sac', 'ppo'],
+        help='Choose the model')
+
+    args = parser.parse_args()
+
+    assert args.model is not None, 'Invalid argument for --model'
+
+    # train(args.model)
+    test(args.model)
