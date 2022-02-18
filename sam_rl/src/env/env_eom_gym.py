@@ -249,42 +249,35 @@ class EnvEOMGym(gym.Env):
     """
     def __init__(self, num_envs=1):
         super(EnvEOMGym, self).__init__()
-        action_high = np.ones(2)
+        action_high = np.ones(5)
         self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
 
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        # obs_high = np.array([200.0, 200.0, 200.0,
-        #                     1.58, 1.58, 1.58,
-        #                     10.0, 10.0, 10.0,
-        #                     10.0, 10.0, 10.0])
-        # (x, z, theta, u, w, q)
-        obs_high = np.array([200.0, 200.0,
-                            1.58,
-                            10.0, 10.0,
-                            10.0])
+        obs_high = np.array([400.0, 400.0, 400.0,
+                            1.58, 1.58, 1.58,
+                            30.0, 30.0, 30.0,
+                            30.0, 30.0, 30.0])
         self.observation_space = gym.spaces.Box(low=-obs_high, high=obs_high)
-        self.ep_length = 300
+        self.ep_length = 400
         self.current_step = 0
         self.num_resets = 0
         self.num_envs = num_envs
 
         # For logger
         self.reward = 0
-        self.state = np.zeros(6)
+        self.state = np.zeros(12)
 
         # EOM simulation
-        # self.init_state = np.array([0., 0., 0.17, 0., 0., 0., 0., 0., 0., 0., 0., 0.]) # x, y, z, phi, theta, psi, u, v, w, p, q, r
         self.init_state = self._reset_uniform()
-        self.prev_action = np.zeros(2)
-        self.setpoint_6d = np.array([0., 0.0, 0.0, 0., 0., 0.])    # (x, z, theta, u, w, q)
+        self.prev_action = np.zeros(5)
         self.env = EnvEOM(self.init_state)
 
     def step(self, action):
-        action_6d = np.array([0., 0., 0., 0., action[0], action[1]])
+        action_6d = np.array([action[0], action[0], 0., action[2], 0., 0.])
         t, state = self.env.step(action_6d) # 12d
 
-        self.state = self._get_obs() # get 6d
-        self.reward = self._calculate_reward(self.state, self.setpoint_6d, action)
+        self.state = self._get_obs() # for plotting
+        self.reward = self._calculate_reward(self.state, action)
 
         self.prev_action = action
 
@@ -296,13 +289,18 @@ class EnvEOMGym(gym.Env):
         self.init_state = init_state
 
     def _reset_uniform(self):
-        xyz = np.random.uniform(-10, 10)
-        rpy = np.random.uniform(-1.57, 1.57)
-        uvw = np.random.uniform(-2, 2)
-        pqr = np.random.uniform(-1, 1)
+        xyz = np.random.uniform(-20, 20, 3)
+        rpy = np.random.uniform(-1.57, 1.57, 3)
+        uvw = np.random.uniform(-2, 2, 3)
+        pqr = np.random.uniform(-1, 1, 3)
 
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        state = np.array([0., 0., xyz, 0., rpy, 0., 0., 0., uvw, 0., pqr, 0.])
+        state = np.array([
+            xyz[0], xyz[1], 0,
+            0., 0., rpy[2],
+            uvw[0], uvw[1], 0.,
+            0., 0., 0.
+            ])
         return state
 
     def reset(self):
@@ -322,29 +320,35 @@ class EnvEOMGym(gym.Env):
 
     def _get_obs(self):
         state = self.env.get_state()
-        x = state[0]
-        z = state[2]
-        theta = state[4]
-        u = state[6]
-        w = state[8]
-        q = state[10]
-        state = np.array([x, z, theta, u, w, q])
         return state
 
-    def _calculate_reward(self, state, target, action):
-        np.set_printoptions(precision=2, suppress=True)
+    def _calculate_reward(self, state, action):
+        # np.set_printoptions(precision=2, suppress=True)
+        # x, y, z,
+        # phi, theta, psi,
+        # u, v, w,
+        # p, q, r
+        Q = np.diag([
+            0.01, 0.01, 0.01,
+            0.03, 0.03, 0.03,
+            0.03, 0.03, 0.03,
+            0.01, 0.01, 0.01])
+        #1-2
+        R = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on controls
+        R_r = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on rates
+        #3-4
+        # R = np.diag([0.03, 0.03, 0.03, 0.03, 0.03, 0.03]) # weights on controls
+        # R_r = np.diag([0.3, 0.3, 0.3, 0.3, 0.3, 0.3]) # weights on rates
+        #5-6
+        # R = np.diag([0.0003, 0.0003, 0.0003, 0.0003, 0.0003, 0.0003]) # weights on controls
+        # R_r = np.diag([0.0003, 0.0003, 0.0003, 0.0003, 0.0003, 0.0003]) # weights on rates
 
-        Q = np.diag([0., 0.1, 0.3, 0., 0.3, 0.])  # weights on states - z, theta, w
-        R = np.diag([0.03, 0.03]) # weights on controls - lcg, vbs
-        R_r = np.diag([0.3, 0.3]) # weights on rates - lcg, vbs
-
-        s_diff = state - target
         a_diff = action - self.prev_action
 
-        e_s = np.linalg.norm(s_diff * Q * s_diff) # error on state
+        e_s = np.linalg.norm(state * Q * state) # error on state, setpoint is all 0's
         e_a = np.linalg.norm(action * R * action) # error on actions
         e_r = np.linalg.norm(a_diff * R_r * a_diff) # error on action rates
-        e = (e_s + e_a + e_r)
+        e = e_s + e_a + e_r
         error = np.maximum(0, 1. - e_s) - e_a - e_r
 
         # print(f'[{self.current_step}] Reward s / a / r / = {e_s/e:.2f} / {e_a/e:.2f} / {e_r/e:.2f} for state {state} and action {action}')
