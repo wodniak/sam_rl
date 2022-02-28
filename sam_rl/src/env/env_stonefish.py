@@ -80,13 +80,10 @@ class ROS_SAM(object):
             lcg_topic, PercentStamped, queue_size=queue_size)
 
         # Variables
-        # self.current_setpoint = np.array(
-        #     [0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        self.current_setpoint = np.array(
-            [5.0, 0.0])
-        self.state = []
+        self.current_setpoint = np.zeros(12)
+        self.state = np.zeros(12)
         self.state_timestamp = 0
-        self.output = []
+        self.enable = True
 
     def _state_feedback_cb(self, odom_msg):
         """
@@ -115,8 +112,7 @@ class ROS_SAM(object):
         # state : (12 x 1)
         # position (3), rotation (3), linear velocity (3), angular velocity (3)
         # with euler angles
-        # current_state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
-        current_state = np.array([z, w])
+        current_state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
         self.state = current_state
         self.state_timestamp = odom_msg.header.stamp
 
@@ -124,8 +120,6 @@ class ROS_SAM(object):
         """
         Subscribe to reference trajectory
         """
-        # Insert functon to get the publshed reference trajectory here
-        # print('getting setpont')
         x = odom_msg.pose.pose.position.x
         y = odom_msg.pose.pose.position.y
         z = odom_msg.pose.pose.position.z
@@ -148,65 +142,97 @@ class ROS_SAM(object):
         r = odom_msg.twist.twist.angular.z
 
         state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
+        print(f'Setting new target to {state}')
         self.current_setpoint = state
 
-    def _enable_cb(self):
-        pass
+    def _enable_cb(self, enable_msg):
+        self.enable = enable_msg.data
+        print(f'Setting Enable to {self.enable}')
 
     def publish_actions(self, action):
-        # lcg = PercentStamped()
-        vbs = PercentStamped()
-        # rpm1 = ThrusterRPM()
-        # rpm2 = ThrusterRPM()
-        # vec = ThrusterAngles()
+        '''
+        :param action (5,) for rpm, de, dr, lcg, vbs
+        '''
+        if not self.enable:
+            return
 
-        vbs.value = action[0]
-        # lcg.value = action[1]
-        # self.rpm1_pub.publish(rpm1)
-        # self.rpm2_pub.publish(rpm2)
-        # self.vec_pub.publish(vec)
+        rpm = ThrusterRPM()
+        vec = ThrusterAngles()
+        vbs = PercentStamped()
+        lcg = PercentStamped()
+
+        rpm.rpm = action[0].astype(int)
+        vec.thruster_vertical_radians = action[1]
+        vec.thruster_horizontal_radians = action[2]
+        vbs.value = action[3]
+        lcg.value = action[4]
+
+        self.rpm1_pub.publish(rpm)
+        self.rpm2_pub.publish(rpm)
+        self.vec_pub.publish(vec)
         self.vbs_pub.publish(vbs)
-        # self.lcg_pub.publish(lcg)
+        self.lcg_pub.publish(lcg)
 
 
 class SAMEnv(ROS_SAM):
     def __init__(self):
         super(SAMEnv, self).__init__()
 
-        self.state_dim = 2
-        self.action_dim = 1  # LCG, VBS
-        self.max_action = np.array([100])  # max LCG = 1, max VBS = 1
-
+        self.state_dim = 12
+        self.action_dim = 5  # RPM, DE, DR, LCG, VBS
+        self.max_action = np.array([1000, 0.1, 0.1, 100, 100])  # max LCG = 1, max VBS = 1
         self.last_state_timestamp = self.state_timestamp
+        self.prev_action = np.zeros(5)
 
     def get_observation(self):
         """Return state with different timestamp then before"""
-
         time.sleep(0.011)
         self.last_state_timestamp = self.state_timestamp
         return self.state
 
     def step(self, action):
-        self.publish_actions(action)
+        action_scaled = np.multiply(action, self.max_action) # scale
+        action_scaled = np.array([
+            action_scaled[0],
+            0,
+            action_scaled[2],
+            0,
+            0])
+        self.publish_actions(action_scaled)
 
         # probably after a short wait
         next_state = self.get_observation()
-        reward = self._calculate_reward(next_state, self.current_setpoint)
+        reward = self._calculate_reward(next_state, action)
         done = False
-        return next_state, reward, done
+        self.prev_action = action
+        return next_state, reward, done, {}
 
     def reset(self):
         # reset state to initial
         vbs = PercentStamped()
         self.vbs_pub.publish(vbs)
-        time.sleep(10)
+        # time.sleep(10)
         return self.get_observation()
 
-    def _calculate_reward(self, state, target):
-        # penalize on depth and elevation angle
-        # add control penalty
-        error = np.power(state[0] - target[0], 2)
-        return -error
+    def _calculate_reward(self, state, action):
+        Q = np.diag([
+            0.01, 0.01, 0.01,
+            0.03, 0.03, 0.03,
+            0.03, 0.03, 0.03,
+            0.01, 0.01, 0.01])
+        R = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on controls
+        R_r = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on rates
+
+        a_diff = action - self.prev_action
+
+        e_s = np.linalg.norm(state * Q * state) # error on state, setpoint is all 0's
+        e_a = np.linalg.norm(action * R * action) # error on actions
+        e_r = np.linalg.norm(a_diff * R_r * a_diff) # error on action rates
+        e = e_s + e_a + e_r
+        error = np.maximum(0, 1. - e_s) - e_a - e_r
+
+        # print(f'[{self.current_step}] Reward s / a / r / = {e_s/e:.2f} / {e_a/e:.2f} / {e_r/e:.2f} for state {state} and action {action}')
+        return error
 
     def _is_done(self, state, target):
         eps = 1e-3

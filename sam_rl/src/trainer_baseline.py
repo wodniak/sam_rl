@@ -431,7 +431,7 @@ def test(model_type : str):
         [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]
         ])
 
-    for episode in range(setpoints.shape[-1]):
+    for episode in range(setpoints.shape[0]):
         # Reset env
         setpoint = setpoints[episode]
         obs = env.reset()
