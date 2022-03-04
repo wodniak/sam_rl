@@ -98,8 +98,8 @@ if __name__ == "__main__":
     model_type = rospy.get_param("~model_type", default="td3")
 
     # define paths
-    base_dir = os.path.expanduser('~') + '/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs/'
-    model_dir = base_dir + 'model/'
+    base_dir = os.path.expanduser('~') + '/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/'
+    model_dir = base_dir
     plot_dir = base_dir + 'plots/'
     tensorboard_logs_dir = base_dir + 'tensorboard_logs/'
     if not os.path.exists(model_dir):
@@ -110,8 +110,8 @@ if __name__ == "__main__":
     if not os.path.exists(tensorboard_logs_dir):
         os.makedirs(tensorboard_logs_dir)
 
-    model_name = '10.27.28-02.17.2022/td3_999750_steps.zip'
-    env_name = '10.27.28-02.17.2022/td3_999750_steps_env.pkl'
+    model_name = 'td3_999750_steps.zip'
+    env_name = 'td3_999750_steps_env.pkl'
 
     env_path = model_dir + env_name
     model_path = model_dir + model_name

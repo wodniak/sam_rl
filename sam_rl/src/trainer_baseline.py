@@ -391,10 +391,10 @@ def test(model_type : str):
     # model_name = '21.14.01-02.15.2022/td3_400000_steps.zip'
     # env_name = '21.14.01-02.15.2022/td3_400000_steps_env.pkl'
 
-    model_name = '10.27.28-02.17.2022/td3_999750_steps.zip'
-    env_name = '10.27.28-02.17.2022/td3_999750_steps_env.pkl'
+    model_name = 'td3_999750_steps.zip'
+    env_name = 'td3_999750_steps_env.pkl'
 
-    env_path = model_dir + env_name
+    env_path = '/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/' + env_name
     env = EnvEOMGym()
     check_env(env)
     env = Monitor(env)
@@ -403,7 +403,7 @@ def test(model_type : str):
     env = VecNormalize.load(env_path, env)
     env.reset()
 
-    model_path = model_dir + model_name
+    model_path = '/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/' + model_name
     assert os.path.exists(model_path), f'Model {model_path} does not exist.'
     print(f'Loading model {model_path}...')
     if model_type == 'ddpg':
