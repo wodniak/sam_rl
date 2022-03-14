@@ -31,46 +31,47 @@ import random
 from scipy.integrate import solve_ivp
 from typing import Optional
 
+
 def T_b2ned(phi, theta, psi):
-    T = np.array([
-        [1, np.sin(phi)*np.tan(theta), np.cos(phi)*np.tan(theta)],
-        [0, np.cos(phi), -np.sin(phi)],
-        [0, np.sin(phi)/np.cos(theta), np.cos(phi)/np.cos(theta)],
-    ])
+    """:return translation matrix in NED frame"""
+    T = np.array(
+        [
+            [1, np.sin(phi) * np.tan(theta), np.cos(phi) * np.tan(theta)],
+            [0, np.cos(phi), -np.sin(phi)],
+            [0, np.sin(phi) / np.cos(theta), np.cos(phi) / np.cos(theta)],
+        ]
+    )
     return T
 
+
 def R_b2ned(phi, theta, psi):
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(phi), -np.sin(phi)],
-        [0, np.sin(phi), np.cos(phi)]
-    ])
-    Ry = np.array([
-        [np.cos(theta), 0, np.sin(theta)],
-        [0, 1, 0],
-        [-np.sin(theta), 0, np.cos(theta)]
-    ])
-    Rz = np.array([
-        [np.cos(psi), -np.sin(psi), 0],
-        [np.sin(psi), np.cos(psi), 0],
-        [0, 0, 1]
-    ])
-    R = Rz@Ry@Rx
+    """:return rotation matrix in NED frame"""
+    Rx = np.array(
+        [[1, 0, 0], [0, np.cos(phi), -np.sin(phi)], [0, np.sin(phi), np.cos(phi)]]
+    )
+    Ry = np.array(
+        [
+            [np.cos(theta), 0, np.sin(theta)],
+            [0, 1, 0],
+            [-np.sin(theta), 0, np.cos(theta)],
+        ]
+    )
+    Rz = np.array(
+        [[np.cos(psi), -np.sin(psi), 0], [np.sin(psi), np.cos(psi), 0], [0, 0, 1]]
+    )
+    R = Rz @ Ry @ Rx
     return R
 
+
 def unskew(mat):
-    return np.array([
-        mat[2,1],
-        mat[0,2],
-        mat[1,0]
-    ])
+    """"""
+    return np.array([mat[2, 1], mat[0, 2], mat[1, 0]])
+
 
 def skew(vec):
-    return np.array([
-    [0, -vec[2], vec[1]],
-    [vec[2], 0, -vec[0]],
-    [-vec[1], vec[0], 0]
-    ])
+    """"""
+    return np.array([[0, -vec[2], vec[1]], [vec[2], 0, -vec[0]], [-vec[1], vec[0], 0]])
+
 
 class EnvEOM(object):
     """
@@ -80,14 +81,15 @@ class EnvEOM(object):
     Action : (1 x 6) (rpm1, rpm2, de, dr, lcg, vbs)
         @note : values are in different ranges, scaled in eom function
     """
+
     def __init__(self, init_state):
         self.timestep = 0.0
-        self.dt = 0.2 # time step
+        self.dt = 0.01  # time step
 
         # system tolerances
         self.atol = 1e-8
         self.rtol = 1e-8
-        self.solver_method='DOP853'
+        self.solver_method = "DOP853"
 
         self.current_x = init_state
         assert self.current_x.shape == (12,), self.current_x
@@ -119,50 +121,46 @@ class EnvEOM(object):
         I_o = np.diag(np.array([0.0294, 1.6202, 1.6202]))
 
         # centre of gravity, buoyancy, and pressure positions, resp. (AUV specific)
-        r_g = np.array([0.1 + lcg*0.01, 0.0, 0.0]) # Including Longitudinal C.G. trim system
+        r_g = np.array(
+            [0.1 + lcg * 0.01, 0.0, 0.0]
+        )  # Including Longitudinal C.G. trim system
         # r_g = np.array([0.1, 0.0, 0.0]) #no effect of Longitudinal C.G. trim system
         r_b = np.array([0.1, 0.0, 0.0])
         r_cp = np.array([0.1, 0.0, 0.0])
 
         # Buoyancy effects
-        W = m*9.81
-        B = W + vbs*1.5  #(AUV specific if a Variable Buoyancy System exists)
+        W = m * 9.81
+        B = W + vbs * 1.5  # (AUV specific if a Variable Buoyancy System exists)
         # B = W #no effect of Variable buoyancy system
 
         # hydrodynamic coefficients (AUV specific)
-        Xuu = 5.
-        Yvv = 20.
-        Zww = 50.
+        Xuu = 5.0
+        Yvv = 20.0
+        Zww = 50.0
         Kpp = 0.1
-        Mqq = 20.
-        Nrr = 20.
+        Mqq = 20.0
+        Nrr = 20.0
 
         # Thruster coefficients (AUV specific)
         K_T = np.array([0.0175, 0.0175])
-        Q_T = np.array([0.001, -0.001])#*0.0
+        Q_T = np.array([0.001, -0.001])  # *0.0
 
         # mass and inertia matrix
-        M = np.block([
-            [m*np.eye(3,3), -m*skew(r_g)],
-            [m*skew(r_g), I_o]
-        ])
-        assert M.shape == (6,6), M
+        M = np.block([[m * np.eye(3, 3), -m * skew(r_g)], [m * skew(r_g), I_o]])
+        assert M.shape == (6, 6), M
 
         # coriolis and centripetal matrix
         nu1 = np.array([u, v, w])
         nu2 = np.array([p, q, r])
-        top_right = -m*skew(nu1) - m*skew(nu2)*skew(r_g)
-        bottom_left = -m*skew(nu1) + m*skew(r_g)*skew(nu2)
+        top_right = -m * skew(nu1) - m * skew(nu2) * skew(r_g)
+        bottom_left = -m * skew(nu1) + m * skew(r_g) * skew(nu2)
         bottom_right = -skew(I_o.dot(nu2))
-        C_RB = np.block([
-            [np.zeros((3,3)), top_right],
-            [bottom_left, bottom_right]
-        ])
+        C_RB = np.block([[np.zeros((3, 3)), top_right], [bottom_left, bottom_right]])
         assert C_RB.shape == (6, 6), C_RB
 
         # damping matrix (AUV specific - This layout is for a slender AUV)
-        forces = np.diag(np.array([Xuu*np.abs(u), Yvv*np.abs(v), Zww*np.abs(w)]))
-        moments = np.diag(np.array([Kpp*np.abs(p), Mqq*np.abs(q), Nrr*np.abs(r)]))
+        forces = np.diag(np.array([Xuu * np.abs(u), Yvv * np.abs(v), Zww * np.abs(w)]))
+        moments = np.diag(np.array([Kpp * np.abs(p), Mqq * np.abs(q), Nrr * np.abs(r)]))
         coupling = np.matmul(skew(r_cp), forces)
         D = np.block([[forces, np.zeros((3, 3))], [-coupling, moments]])
         assert D.shape == (6, 6), D
@@ -170,33 +168,33 @@ class EnvEOM(object):
         # rotational transform between body and NED in Euler
         T_euler = T_b2ned(phi, theta, psi)
         R_euler = R_b2ned(phi, theta, psi)
-        assert R_euler.shape == (3,3), R_euler
-        J_eta = np.block([
-            [R_euler, np.zeros((3,3))],
-            [np.zeros((3,3)), T_euler]
-        ])
-        assert J_eta.shape == (6,6), J_eta
+        assert R_euler.shape == (3, 3), R_euler
+        J_eta = np.block([[R_euler, np.zeros((3, 3))], [np.zeros((3, 3)), T_euler]])
+        assert J_eta.shape == (6, 6), J_eta
 
         # buoyancy in quaternions
         f_g = np.array([0, 0, W])
         f_b = np.array([0, 0, -B])
         row1 = np.linalg.inv(R_euler).dot(f_g + f_b)
-        row2 = skew(r_g).dot(np.linalg.inv(R_euler)).dot(f_g) + \
-            skew(r_b).dot(np.linalg.inv(R_euler)).dot(f_b)
+        row2 = skew(r_g).dot(np.linalg.inv(R_euler)).dot(f_g) + skew(r_b).dot(
+            np.linalg.inv(R_euler)
+        ).dot(f_b)
         geta = np.block([row1, row2])
         assert geta.shape == (6,), geta
 
         # Effect of control actuators (AUV specific)
         F_T = K_T.dot(np.array([rpm1, rpm2]))
         M_T = Q_T.dot(np.array([rpm1, rpm2]))
-        tauc = np.array([
-            F_T*np.cos(de)*np.cos(dr),
-            -F_T*np.sin(dr),
-            F_T*np.sin(de)*np.cos(dr),
-            M_T*np.cos(de)*np.cos(dr),
-            -M_T*np.sin(dr),
-            M_T*np.sin(de)*np.cos(dr)
-        ])
+        tauc = np.array(
+            [
+                F_T * np.cos(de) * np.cos(dr),
+                -F_T * np.sin(dr),
+                F_T * np.sin(de) * np.cos(dr),
+                M_T * np.cos(de) * np.cos(dr),
+                -M_T * np.sin(dr),
+                M_T * np.sin(de) * np.cos(dr),
+            ]
+        )
         assert tauc.shape == (6,), tauc
 
         # rate of change of position in NED frame
@@ -214,31 +212,42 @@ class EnvEOM(object):
         """
         # integrate dynamics (also consider - lambda t, x: eom(x, controller(x)),)
         sol = solve_ivp(
-                lambda t, x: self.eom(x, action),
-                (t0, tf),
-                state,
-                method=method,
-                rtol=rtol,
-                atol=atol,
-                #jac=lambda t, x: eom_jac(x, controller(x))
-            )
+            lambda t, x: self.eom(x, action),
+            (t0, tf),
+            state,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            # jac=lambda t, x: eom_jac(x, controller(x))
+        )
 
         times, states = sol.t, sol.y.T
         return times, states
 
     def step(self, action):
+        """One step in the simulation"""
         # propagate system
         next_ts = self.timestep + self.dt
-        t_out, x_out = self.propagate(self.current_x, action, self.timestep, next_ts, self.atol, self.rtol, self.solver_method)
+        t_out, x_out = self.propagate(
+            self.current_x,
+            action,
+            self.timestep,
+            next_ts,
+            self.atol,
+            self.rtol,
+            self.solver_method,
+        )
 
         self.timestep = t_out[-1]
-        self.current_x = x_out[-1,:]
+        self.current_x = x_out[-1, :]
         return self.timestep, self.current_x
 
     def get_state(self):
+        """:return current state"""
         return self.current_x
 
     def set_state(self, state):
+        """:param state - set new current state"""
         self.current_x = state
 
 
@@ -247,18 +256,18 @@ class EnvEOMGym(gym.Env):
     Define common API to env and cost function for the task
     Learns to control trim (depth and pitch angle)
     """
-    def __init__(self, num_envs=1):
+
+    def __init__(self, episode_length, num_envs=1):
         super(EnvEOMGym, self).__init__()
         action_high = np.ones(5)
         self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
 
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        obs_high = np.array([400.0, 400.0, 400.0,
-                            1.58, 1.58, 1.58,
-                            30.0, 30.0, 30.0,
-                            30.0, 30.0, 30.0])
+        obs_high = np.array(
+            [400.0, 400.0, 400.0, 1.58, 1.58, 1.58, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+        )
         self.observation_space = gym.spaces.Box(low=-obs_high, high=obs_high)
-        self.ep_length = 400
+        self.ep_length = episode_length
         self.current_step = 0
         self.num_resets = 0
         self.num_envs = num_envs
@@ -273,17 +282,34 @@ class EnvEOMGym(gym.Env):
         self.env = EnvEOM(self.init_state)
 
     def step(self, action):
-        action_6d = np.array([action[0], action[0], 0., action[2], 0., 0.])
-        t, state = self.env.step(action_6d) # 12d
+        # action_6d = np.concatenate(([action[0]], action)) # append rpm
+        action_6d = np.array([action[0], action[0], 0.0, action[2], 0.0, 0.0])
+        t, state = self.env.step(action_6d)  # 12d
 
-        self.state = self._get_obs() # for plotting
-        self.reward = self._calculate_reward(self.state, action)
+        self.state = self._get_obs()  # for plotting
+        # self.reward, reward_info = self._calculate_reward(self.state, action)
+        self.reward, reward_info = self._calculate_reward2(self.state, action)
 
         self.prev_action = action
 
         self.current_step += 1
         done = self.current_step >= self.ep_length
-        return self.state, self.reward, done, {}
+
+        info_state = {
+            "xyz": self.state[0:3].round(2).tolist(),
+            "rpy": self.state[3:6].round(2).tolist(),
+        }
+        action_6d = action_6d.round(2).tolist()
+        info_actions = {
+            "rpm": action_6d[1],
+            "de": action_6d[2],
+            "dr": action_6d[3],
+            "lcg": action_6d[4],
+            "vbs": action_6d[5],
+        }
+        info = {"rewards": reward_info, "state": info_state, "actions": info_actions}
+
+        return self.state, self.reward, done, info
 
     def set_init_state(self, init_state):
         self.init_state = init_state
@@ -295,12 +321,9 @@ class EnvEOMGym(gym.Env):
         pqr = np.random.uniform(-1, 1, 3)
 
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        state = np.array([
-            xyz[0], xyz[1], 0,
-            0., 0., rpy[2],
-            uvw[0], uvw[1], 0.,
-            0., 0., 0.
-            ])
+        state = np.array(
+            [xyz[0], xyz[1], 0.0, 0.0, 0.0, rpy[2], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        )
         return state
 
     def reset(self):
@@ -323,42 +346,108 @@ class EnvEOMGym(gym.Env):
         return state
 
     def _calculate_reward(self, state, action):
-        # np.set_printoptions(precision=2, suppress=True)
-        # x, y, z,
-        # phi, theta, psi,
-        # u, v, w,
-        # p, q, r
-        Q = np.diag([
-            0.01, 0.01, 0.01,
-            0.03, 0.03, 0.03,
-            0.03, 0.03, 0.03,
-            0.01, 0.01, 0.01])
-        #1-2
-        R = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on controls
-        R_r = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on rates
-        #3-4
-        # R = np.diag([0.03, 0.03, 0.03, 0.03, 0.03, 0.03]) # weights on controls
-        # R_r = np.diag([0.3, 0.3, 0.3, 0.3, 0.3, 0.3]) # weights on rates
-        #5-6
-        # R = np.diag([0.0003, 0.0003, 0.0003, 0.0003, 0.0003, 0.0003]) # weights on controls
-        # R_r = np.diag([0.0003, 0.0003, 0.0003, 0.0003, 0.0003, 0.0003]) # weights on rates
+        """
+        :param state: 12d state vector
+            x, y, z,
+            phi, theta, psi,
+            u, v, w,
+            p, q, r
+        :param action: 5d action vector
+        """
+        a_diff = action - self.prev_action
+
+        e_position = np.log(np.linalg.norm(state[0:3]))
+        e_orientation = 0.2 * np.linalg.norm(state[3:6])
+        e_lin_vel = 0.1 * np.linalg.norm(state[6:9])
+        e_ang_vel = 0.1 * np.linalg.norm(state[9:12])
+        e_action = 0.1 * np.linalg.norm(action)
+        e_action_rate = 0.1 * np.linalg.norm(a_diff)
+
+        dt = 0.01
+        e_total = -dt * np.sum(
+            [e_position, e_orientation, e_lin_vel, e_ang_vel, e_action, e_action_rate]
+        )
+
+        e_info = {
+            "e_total": round(e_total, 3),
+            "e_position": round(-e_position, 3),
+            "e_orientation": round(-e_orientation, 3),
+            "e_lin_vel": round(-e_lin_vel, 3),
+            "e_ang_vel": round(-e_ang_vel, 3),
+            "e_action": round(-e_action, 3),
+            "e_action_rate": round(-e_action_rate, 3),
+        }
+
+        return e_total, e_info
+
+    def _calculate_reward2(self, state, action):
+        Q = np.diag(
+            [0.01, 0.01, 0.01, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.01, 0.01, 0.01]
+        )
+        R = np.diag([0.003, 0.003, 0.003, 0.003, 0.003])  # weights on controls
+        R_r = np.diag([0.003, 0.003, 0.003, 0.003, 0.003])  # weights on rates
 
         a_diff = action - self.prev_action
 
-        e_s = np.linalg.norm(state * Q * state) # error on state, setpoint is all 0's
-        e_a = np.linalg.norm(action * R * action) # error on actions
-        e_r = np.linalg.norm(a_diff * R_r * a_diff) # error on action rates
+        e_s = np.linalg.norm(state * Q * state)  # error on state, setpoint is all 0's
+        e_a = np.linalg.norm(action * R * action)  # error on actions
+        e_r = np.linalg.norm(a_diff * R_r * a_diff)  # error on action rates
         e = e_s + e_a + e_r
-        error = np.maximum(0, 1. - e_s) - e_a - e_r
+        error = np.maximum(0, 1.0 - e_s) - e_a - e_r
 
-        # print(f'[{self.current_step}] Reward s / a / r / = {e_s/e:.2f} / {e_a/e:.2f} / {e_r/e:.2f} for state {state} and action {action}')
-        return error
+        e_info = {
+            "e_total": round(error, 3),
+            "e_state": round(-e_s, 3),
+            "e_action": round(-e_a, 3),
+            "e_action_rate": round(-e_r, 3),
+        }
+
+        return error, e_info
+
+    def _calculate_reward3(self, state, action):
+        """
+        :param state: 12d state vector
+            x, y, z,
+            phi, theta, psi,
+            u, v, w,
+            p, q, r
+        :param action: 5d action vector
+        """
+        a_diff = action - self.prev_action
+
+        e_position = 1 / (np.linalg.norm(state[0:3]) + 1)
+        e_orientation = 1 / (np.linalg.norm(state[0:6]) + 1)
+        e_lin_vel = 1 / (np.linalg.norm(state[6:9]) + 1)
+        e_ang_vel = 1 / (np.linalg.norm(state[9:12]) + 1)
+        e_action = 1 / (np.linalg.norm(action) + 1)
+        e_action_rate = 1 / (np.linalg.norm(a_diff) + 1)
+
+        e_total = (
+            0.56 * e_position
+            + 0.2 * e_orientation
+            + 0.02 * e_lin_vel
+            + 0.02 * e_ang_vel
+            + 0.1 * e_action
+            + 0.1 * e_action_rate
+        )
+
+        e_info = {
+            "e_total": round(e_total, 3),
+            "e_position": round(e_position, 3),
+            "e_orientation": round(e_orientation, 3),
+            "e_lin_vel": round(e_lin_vel, 3),
+            "e_ang_vel": round(e_ang_vel, 3),
+            "e_action": round(e_action, 3),
+            "e_action_rate": round(e_action_rate, 3),
+        }
+
+        return e_total, e_info
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     env = EnvEOMGym()
-    target = np.array([0., 0.0, 0.0, 0., 0., 0.])
-    state = np.array([0., 1., 0.0, 0., 0., 0.])
+    target = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    state = np.array([0.0, 1.0, 0.0, 0.0, 0.0, 0.0])
     action = np.array([0.2, 0.5])
 
     reward = env._calculate_reward(state, target, action)

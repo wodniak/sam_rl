@@ -1,0 +1,7 @@
+{
+    "python.linting.pylintEnabled": true,
+    "python.linting.pylintPath": "/home/gwozniak/.local/bin/pylint",
+    "python.pythonPath": "/usr/bin/python",
+    "python.linting.enabled": true,
+    "python.formatting.provider": "black"
+}
