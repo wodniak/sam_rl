@@ -36,7 +36,7 @@ from stable_baselines3.common.vec_env import (
     DummyVecEnv,
     VecMonitor,
     SubprocVecEnv,
-    # VecNormalize,
+    VecNormalize,
 )
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, EvalCallback
 from stable_baselines3.common.monitor import Monitor
@@ -63,9 +63,9 @@ class TensorboardCallback(BaseCallback):
     def _on_rollout_end(self) -> None:
         self.logger.record("reward", self.reward)
 
-        if self.episode % self.n_envs == 0:
-            self.plot_trim()
-            self.plot_traj_3d()
+        # if self.episode % self.n_envs == 0:
+        #     self.plot_trim()
+        #     self.plot_traj_3d()
 
         self.logger.dump(self.num_timesteps)
         self.reward = 0
@@ -86,16 +86,20 @@ class TensorboardCallback(BaseCallback):
 
     def plot_trim(self) -> None:
         """dsds"""
-        fig, axs = plt.subplots(3)
-        axs[0].set_ylim([-1.1, 1.1])
-        axs[1].set_ylim([-1.1, 1.1])
-        axs[2].set_ylim([-1.1, 1.1])
-        axs[0].plot(self.t, self.actions[:, 0], label="rpm")
-        axs[1].plot(self.t, self.actions[:, 1:3], label=["de", "dr"])
-        axs[2].plot(self.t, self.actions[:, 3:5], label=["lcg", "vbs"])
-        for ax in axs:
-            ax.legend()
-            ax.grid()
+        # fig, axs = plt.subplots(3)
+        # axs[0].set_ylim([-1.1, 1.1])
+        # axs[1].set_ylim([-1.1, 1.1])
+        # axs[2].set_ylim([-1.1, 1.1])
+        # axs[0].plot(self.t, self.actions[:, 0], label="rpm")
+        # axs[1].plot(self.t, self.actions[:, 1:3], label=["de", "dr"])
+        # axs[2].plot(self.t, self.actions[:, 3:5], label=["lcg", "vbs"])
+        # for ax in axs:
+        #     ax.legend()
+        #     ax.grid()
+        fig = plt.figure(1)
+        plt.plot(self.t, self.actions, label=["lcg", "vbs"])
+        plt.legend()
+        plt.grid()
         self.logger.record(
             f"trim/{self.episode}_actions",
             Figure(fig, close=True),
@@ -171,11 +175,16 @@ class SaveVecNormalizeCheckpoint(BaseCallback):
 
     def _on_step(self):
         if self.num_timesteps % self.save_freq == 0:
+            print("Saving model...")
             if hasattr(self.model, "save"):
                 model_path = "{}/{}_{}_steps".format(
                     self.save_path, self.name_prefix, self.num_timesteps
                 )
                 self.model.save(model_path)
+            else:
+                print(
+                    f"[WARN] Model {self.name_prefix} not saved at timestep {self.num_timesteps}"
+                )
 
             if hasattr(self.training_env, "save"):
                 env_path = "{}/{}_{}_steps_env.pkl".format(
@@ -201,12 +210,8 @@ def train(model_type: str, params):
 
     ep_length = params["episode_length"]
 
-    env = EnvEOMGym(ep_length)
-    # check_env(env)
-    env = Monitor(env)
-    env = SubprocVecEnv([make_env(i, ep_length) for i in range(params["num_cpu"])])
-    env = VecMonitor(venv=env)
-    # env = DummyVecEnv([lambda: env])
+    # env = SubprocVecEnv([make_env(i, ep_length) for i in range(params["num_cpu"])])
+    # env = VecMonitor(venv=env)
     # env = VecNormalize(
     #     venv=env,
     #     training=True,
@@ -216,13 +221,13 @@ def train(model_type: str, params):
     #     gamma=0.99,
     # )
 
+    env = EnvEOMGym(ep_length)
+    env = Monitor(env)
+    env = DummyVecEnv([lambda: env])
+
     # for evaluation
-    eval_env = EnvEOMGym(ep_length)
-    # check_env(eval_env)
-    eval_env = Monitor(eval_env)
-    # eval_env = DummyVecEnv([lambda: eval_env])
-    eval_env = SubprocVecEnv([make_env(i, ep_length) for i in range(1)])
-    eval_env = VecMonitor(venv=eval_env)
+    # eval_env = SubprocVecEnv([make_env(i, ep_length) for i in range(1)])
+    # eval_env = VecMonitor(venv=eval_env)
     # eval_env = VecNormalize(
     #     venv=eval_env,
     #     training=False,
@@ -231,6 +236,9 @@ def train(model_type: str, params):
     #     clip_obs=40.0,
     #     gamma=0.99,
     # )
+    eval_env = EnvEOMGym(ep_length)
+    eval_env = Monitor(eval_env)
+    eval_env = DummyVecEnv([lambda: eval_env])
 
     # The noise objects for DDPG
     n_actions = env.action_space.shape[-1]
@@ -432,8 +440,10 @@ def test(model_type: str, params):
         fig.suptitle(title)
         plt.savefig(plot_dir + f"{epoch}_traj_2d")
 
-    model_name = "09.49.12-03.14.2022/td3_450000_steps.zip"
-    env_name = "22.16.09-03.10.2022/td3_5925000_steps_env.pkl"
+    model_name = "10.22.55-03.16.2022/td3_840000_steps.zip"  # green
+    # model_name = "10.21.56-03.16.2022/td3_840000_steps.zip"  # red
+    # model_name = "10.21.11-03.16.2022/td3_840000_steps.zip"  # blue
+    env_name = "13.36.38-03.15.2022/td3_1050000_steps_env.pkl"
 
     env_path = params["model_dir"] + env_name
     model_path = params["model_dir"] + model_name
@@ -469,9 +479,11 @@ def test(model_type: str, params):
     setpoints = np.array(
         [
             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            # [5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            # [0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            # [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ]
     )
 
@@ -568,11 +580,11 @@ if __name__ == "__main__":
     model_path = model_dir + start_time
 
     train_param = {
-        "episode_length": 2048,  # 10s of sim flight per episode
+        "episode_length": 3000,  # 10s of sim flight per episode
         "total_episodes": 6000,
         "num_cpu": 1,
         "off_policy_kwargs": dict(
-            net_arch=[dict(pi=[64, 64], qf=[64, 64])]
+            net_arch=dict(pi=[64, 64], qf=[64, 64])
         ),  # for off-policy only
         "on_policy_kwargs": dict(
             net_arch=[dict(pi=[64, 64], vf=[64, 64])]
@@ -586,13 +598,13 @@ if __name__ == "__main__":
         "device": "auto",
         "train_freq": 5,  # episodes
         "gradient_steps": -1,  # all accumulated
-        "verbose": 1,
+        "verbose": 0,
         "sigma": 0.1,  # action noise
         "tensorboard_log": tf_writer_path,
         "model_path": model_path,
         "model_dir": model_dir,
-        "save_freq": 1000,  # episodes
-        "eval_freq": 50,  # episodes
+        "save_freq": 100,  # episodes
+        "eval_freq": 10,  # episodes
         "n_eval_episodes": 5,  # episodes
     }
 

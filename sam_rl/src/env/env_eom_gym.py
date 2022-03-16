@@ -259,7 +259,7 @@ class EnvEOMGym(gym.Env):
 
     def __init__(self, episode_length, num_envs=1):
         super(EnvEOMGym, self).__init__()
-        action_high = np.ones(5)
+        action_high = np.ones(2)
         self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
 
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
@@ -278,20 +278,23 @@ class EnvEOMGym(gym.Env):
 
         # EOM simulation
         self.init_state = self._reset_uniform()
-        self.prev_action = np.zeros(5)
+        self.prev_action = np.zeros(2)
         self.env = EnvEOM(self.init_state)
 
     def step(self, action):
         # action_6d = np.concatenate(([action[0]], action)) # append rpm
-        action_6d = np.array([action[0], action[0], 0.0, action[2], 0.0, 0.0])
+        # action_6d = np.array([action[0], action[0], 0.0, action[2], 0.0, 0.0])
+        action_6d = np.array([0.0, 0.0, 0.0, 0.0, action[0], action[1]])
+
         t, state = self.env.step(action_6d)  # 12d
 
         self.state = self._get_obs()  # for plotting
+
         # self.reward, reward_info = self._calculate_reward(self.state, action)
-        self.reward, reward_info = self._calculate_reward2(self.state, action)
+        # self.reward, reward_info = self._calculate_reward_xy(self.state, action)
+        self.reward, reward_info = self._calculate_reward_trim(self.state, action)
 
         self.prev_action = action
-
         self.current_step += 1
         done = self.current_step >= self.ep_length
 
@@ -315,14 +318,15 @@ class EnvEOMGym(gym.Env):
         self.init_state = init_state
 
     def _reset_uniform(self):
-        xyz = np.random.uniform(-20, 20, 3)
+        xyz = np.random.uniform(-5, 5, 3)
         rpy = np.random.uniform(-1.57, 1.57, 3)
         uvw = np.random.uniform(-2, 2, 3)
         pqr = np.random.uniform(-1, 1, 3)
 
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
         state = np.array(
-            [xyz[0], xyz[1], 0.0, 0.0, 0.0, rpy[2], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            # [xyz[0], xyz[1], 0.0, 0.0, 0.0, rpy[2], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            [0.0, 0.0, xyz[2], 0.0, rpy[1], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         )
         return state
 
@@ -345,7 +349,7 @@ class EnvEOMGym(gym.Env):
         state = self.env.get_state()
         return state
 
-    def _calculate_reward(self, state, action):
+    def _calculate_reward_xy(self, state, action):
         """
         :param state: 12d state vector
             x, y, z,
@@ -380,7 +384,7 @@ class EnvEOMGym(gym.Env):
 
         return e_total, e_info
 
-    def _calculate_reward2(self, state, action):
+    def _calculate_reward_xy2(self, state, action):
         Q = np.diag(
             [0.01, 0.01, 0.01, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.01, 0.01, 0.01]
         )
@@ -404,7 +408,7 @@ class EnvEOMGym(gym.Env):
 
         return error, e_info
 
-    def _calculate_reward3(self, state, action):
+    def _calculate_reward_xy3(self, state, action):
         """
         :param state: 12d state vector
             x, y, z,
@@ -443,12 +447,60 @@ class EnvEOMGym(gym.Env):
 
         return e_total, e_info
 
+    def _calculate_reward_trim(self, state, action):
+        # x, y, z, phi, theta, psi, u, v, w, p, q, r)
+        Q = np.diag(
+            [0.0, 0.0, 0.01, 0.0, 0.03, 0.0, 0.0, 0.0, 0.03, 0.0, 0.0, 0.01]
+        )  # z, pitch, v, q
+        R = np.diag([0.03, 0.03])  # weights on controls
+        R_r = np.diag([0.3, 0.3])  # weights on rates
+
+        a_diff = action - self.prev_action
+
+        e_s = np.linalg.norm(state * Q * state)  # error on state, setpoint is all 0's
+        e_a = np.linalg.norm(action * R * action)  # error on actions
+        e_r = np.linalg.norm(a_diff * R_r * a_diff)  # error on action rates
+        e = e_s + e_a + e_r
+        error = np.maximum(0, 1.0 - e_s) - e_a - e_r
+
+        e_info = {
+            "e_total": round(error, 3),
+            "e_state": round(-e_s, 3),
+            "e_action": round(-e_a, 3),
+            "e_action_rate": round(-e_r, 3),
+        }
+
+        return error, e_info
+
 
 if __name__ == "__main__":
-    env = EnvEOMGym()
-    target = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    state = np.array([0.0, 1.0, 0.0, 0.0, 0.0, 0.0])
-    action = np.array([0.2, 0.5])
+    import matplotlib.pyplot as plt
 
-    reward = env._calculate_reward(state, target, action)
-    print(reward)
+    ep_length = 8000
+    env = EnvEOMGym(episode_length=ep_length, num_envs=1)
+    action = np.array([-1, 0.0, 1.0, 0.0, 0.0])
+
+    states = np.zeros([ep_length, 12])
+    for ts in range(ep_length):
+        state, reward, done, info = env.step(action)
+        states[ts] = state
+
+        print(
+            "[{}] {}\n{}\n{}\n".format(
+                ts, info["state"], info["actions"], info["rewards"]
+            )
+        )
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    ax.plot(states[:, 0], states[:, 1], "k-", label="sim")
+    ax.plot(states[:1, 0], states[:1, 1], "go", label="start")
+    ax.plot(states[-1, 0], states[-1, 1], "ro", label="end")
+
+    # format
+    ax.set_xlabel("$x~[m]$")
+    ax.set_ylabel("$y~[m]$")
+    plt.legend()
+    fig.suptitle("test")
+    plt.show()

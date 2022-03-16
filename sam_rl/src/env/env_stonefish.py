@@ -37,7 +37,10 @@ from smarc_msgs.msg import ThrusterRPM
 from sam_msgs.msg import ThrusterAngles, PercentStamped
 from std_msgs.msg import Float64, Header, Bool
 
+
 class ROS_SAM(object):
+    """Use stonefish SAM simulator"""
+
     def __init__(self):
         # Launch parameters
         self.xy_tolerance = rospy.get_param("~xy_tolerance", default=1.0)
@@ -46,38 +49,34 @@ class ROS_SAM(object):
 
         # Topics for feedback and actuators
         state_feedback_topic = rospy.get_param(
-            "~state_feedback_topic", default="/sam/sim/odom")
+            "~state_feedback_topic", default="/sam/sim/odom"
+        )
         setpoint_topic = rospy.get_param(
-            "~setpoint_topic", default="/sam/ctrl/rl/setpoint")
+            "~setpoint_topic", default="/sam/ctrl/rl/setpoint"
+        )
         vbs_topic = rospy.get_param("~vbs_topic", default="/sam/core/vbs_cmd")
         lcg_topic = rospy.get_param("~lcg_topic", default="/sam/core/lcg_cmd")
-        rpm1_topic = rospy.get_param(
-            "~rpm1_topic", default="/sam/core/thruster1_cmd")
-        rpm2_topic = rospy.get_param(
-            "~rpm2_topic", default="/sam/core/thruster2_cmd")
+        rpm1_topic = rospy.get_param("~rpm1_topic", default="/sam/core/thruster1_cmd")
+        rpm2_topic = rospy.get_param("~rpm2_topic", default="/sam/core/thruster2_cmd")
         thrust_vector_cmd_topic = rospy.get_param(
-            "~thrust_vector_cmd_topic", default="/sam/core/thrust_vector_cmd")
-        enable_topic = rospy.get_param(
-            "~enable_topic", default="/sam/ctrl/rl/enable")
+            "~thrust_vector_cmd_topic", default="/sam/core/thrust_vector_cmd"
+        )
+        enable_topic = rospy.get_param("~enable_topic", default="/sam/ctrl/rl/enable")
 
         # Subscribers to state feedback, setpoints and enable flags
-        rospy.Subscriber(state_feedback_topic, Odometry,
-                         self._state_feedback_cb)
+        rospy.Subscriber(state_feedback_topic, Odometry, self._state_feedback_cb)
         rospy.Subscriber(setpoint_topic, Odometry, self._setpoint_cb)
         rospy.Subscriber(enable_topic, Bool, self._enable_cb)
 
         # Publishers to actuators
         queue_size = 1
-        self.rpm1_pub = rospy.Publisher(
-            rpm1_topic, ThrusterRPM, queue_size=queue_size)
-        self.rpm2_pub = rospy.Publisher(
-            rpm2_topic, ThrusterRPM, queue_size=queue_size)
+        self.rpm1_pub = rospy.Publisher(rpm1_topic, ThrusterRPM, queue_size=queue_size)
+        self.rpm2_pub = rospy.Publisher(rpm2_topic, ThrusterRPM, queue_size=queue_size)
         self.vec_pub = rospy.Publisher(
-            thrust_vector_cmd_topic, ThrusterAngles, queue_size=queue_size)
-        self.vbs_pub = rospy.Publisher(
-            vbs_topic, PercentStamped, queue_size=queue_size)
-        self.lcg_pub = rospy.Publisher(
-            lcg_topic, PercentStamped, queue_size=queue_size)
+            thrust_vector_cmd_topic, ThrusterAngles, queue_size=queue_size
+        )
+        self.vbs_pub = rospy.Publisher(vbs_topic, PercentStamped, queue_size=queue_size)
+        self.lcg_pub = rospy.Publisher(lcg_topic, PercentStamped, queue_size=queue_size)
 
         # Variables
         self.current_setpoint = np.zeros(12)
@@ -100,7 +99,7 @@ class ROS_SAM(object):
         rpy = utils.euler_from_quaternion([eps1, eps2, eps3, eta0])
         roll = rpy[0]
         pitch = rpy[1]
-        yaw = (1.571-rpy[2]) # ENU to NED
+        yaw = 1.571 - rpy[2]  # ENU to NED
 
         u = odom_msg.twist.twist.linear.x
         v = odom_msg.twist.twist.linear.y
@@ -142,17 +141,17 @@ class ROS_SAM(object):
         r = odom_msg.twist.twist.angular.z
 
         state = np.array([x, y, z, roll, pitch, yaw, u, v, w, p, q, r])
-        print(f'Setting new target to {state}')
+        print(f"Setting new target to {state}")
         self.current_setpoint = state
 
     def _enable_cb(self, enable_msg):
         self.enable = enable_msg.data
-        print(f'Setting Enable to {self.enable}')
+        print(f"Setting Enable to {self.enable}")
 
     def publish_actions(self, action):
-        '''
+        """
         :param action (5,) for rpm, de, dr, lcg, vbs
-        '''
+        """
         if not self.enable:
             return
 
@@ -175,12 +174,16 @@ class ROS_SAM(object):
 
 
 class SAMEnv(ROS_SAM):
+    """SAM in stonefish"""
+
     def __init__(self):
         super(SAMEnv, self).__init__()
 
         self.state_dim = 12
         self.action_dim = 5  # RPM, DE, DR, LCG, VBS
-        self.max_action = np.array([1000, 0.1, 0.1, 100, 100])  # max LCG = 1, max VBS = 1
+        self.max_action = np.array(
+            [1000, 0.1, 0.1, 100, 100]
+        )  # max LCG = 1, max VBS = 1
         self.last_state_timestamp = self.state_timestamp
         self.prev_action = np.zeros(5)
 
@@ -191,13 +194,8 @@ class SAMEnv(ROS_SAM):
         return self.state
 
     def step(self, action):
-        action_scaled = np.multiply(action, self.max_action) # scale
-        action_scaled = np.array([
-            action_scaled[0],
-            0,
-            action_scaled[2],
-            0,
-            0])
+        action_scaled = np.multiply(action, self.max_action)  # scale
+        action_scaled = np.array([action_scaled[0], 0, action_scaled[2], 0, 0])
         self.publish_actions(action_scaled)
 
         # probably after a short wait
@@ -215,21 +213,19 @@ class SAMEnv(ROS_SAM):
         return self.get_observation()
 
     def _calculate_reward(self, state, action):
-        Q = np.diag([
-            0.01, 0.01, 0.01,
-            0.03, 0.03, 0.03,
-            0.03, 0.03, 0.03,
-            0.01, 0.01, 0.01])
-        R = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on controls
-        R_r = np.diag([0.003, 0.003, 0.003, 0.003, 0.003]) # weights on rates
+        Q = np.diag(
+            [0.01, 0.01, 0.01, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.01, 0.01, 0.01]
+        )
+        R = np.diag([0.003, 0.003, 0.003, 0.003, 0.003])  # weights on controls
+        R_r = np.diag([0.003, 0.003, 0.003, 0.003, 0.003])  # weights on rates
 
         a_diff = action - self.prev_action
 
-        e_s = np.linalg.norm(state * Q * state) # error on state, setpoint is all 0's
-        e_a = np.linalg.norm(action * R * action) # error on actions
-        e_r = np.linalg.norm(a_diff * R_r * a_diff) # error on action rates
+        e_s = np.linalg.norm(state * Q * state)  # error on state, setpoint is all 0's
+        e_a = np.linalg.norm(action * R * action)  # error on actions
+        e_r = np.linalg.norm(a_diff * R_r * a_diff)  # error on action rates
         e = e_s + e_a + e_r
-        error = np.maximum(0, 1. - e_s) - e_a - e_r
+        error = np.maximum(0, 1.0 - e_s) - e_a - e_r
 
         # print(f'[{self.current_step}] Reward s / a / r / = {e_s/e:.2f} / {e_a/e:.2f} / {e_r/e:.2f} for state {state} and action {action}')
         return error
