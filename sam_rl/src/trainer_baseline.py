@@ -28,6 +28,7 @@ import datetime
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import itertools
 
 from stable_baselines3 import DDPG, TD3, SAC, PPO
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
@@ -74,7 +75,7 @@ class TensorboardCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         reward = self.training_env.get_attr("reward")[0]
-        state = self.training_env.get_attr("state")[0]
+        state = self.training_env.get_attr("full_state")[0]
         action = self.training_env.get_attr("prev_action")[0]
 
         self.reward += reward
@@ -440,7 +441,8 @@ def test(model_type: str, params):
         fig.suptitle(title)
         plt.savefig(plot_dir + f"{epoch}_traj_2d")
 
-    model_name = "10.22.55-03.16.2022/td3_840000_steps.zip"  # green
+    model_name = "15.53.43-03.16.2022/td3_240000_steps.zip"  # gray
+    # model_name = "10.22.55-03.16.2022/td3_3600000_steps.zip"  # green
     # model_name = "10.21.56-03.16.2022/td3_840000_steps.zip"  # red
     # model_name = "10.21.11-03.16.2022/td3_840000_steps.zip"  # blue
     env_name = "13.36.38-03.15.2022/td3_1050000_steps_env.pkl"
@@ -450,7 +452,9 @@ def test(model_type: str, params):
     # model_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/td3_999750_steps.zip"
     # env_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/td3_999750_steps_env.pkl"
 
-    env = EnvEOMGym(params["episode_length"])
+    env = EnvEOMGym(
+        params["episode_length"], params["env_state"], params["env_actions"]
+    )
     check_env(env)
     env = Monitor(env)
     env = DummyVecEnv([lambda: env])
@@ -476,14 +480,27 @@ def test(model_type: str, params):
     state_dim = env.get_attr("observation_space", 0)[0].shape[-1]
 
     # define setpoints
+    # setpoints = np.array(
+    #     [
+    #         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    #         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    #         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    #         # [5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    #         # [0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    #         # [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    #     ]
+    # )
+
+    # (x, z, theta, u, w, q)
     setpoints = np.array(
         [
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            # [5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            # [0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            # [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 5.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 5.0, 0.5, 0.0, 0.0, 0.0],
+            [0.0, -3.0, 0.5, 0.0, 0.0, 0.0],
+            [0.0, -3.0, -0.5, 0.0, 0.0, 0.0],
+            [0.0, 10.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, -10.0, 0.0, 0.0, 0.0, 0.0],
         ]
     )
 
@@ -496,27 +513,31 @@ def test(model_type: str, params):
         end_state = obs
 
         # for plots
-        actions = np.zeros([ep_length, action_dim])
-        states = np.zeros([ep_length, state_dim])
-        t = np.linspace(0, ep_length, ep_length).astype(int)
+        ep_actions = np.zeros([ep_length, 5])
+        ep_states = np.zeros([ep_length, 12])
+        ep_t = np.linspace(0, ep_length, ep_length).astype(int)
 
         ep_reward = 0
         for ts in range(ep_length):
-            states[ts] = obs  # save
-
             obs -= setpoint  # will follow setpoint
             action, _states = model.predict(obs)  # deterministic for DDPG
 
-            actions[ts] = action  # save
-
             obs, rewards, dones, info = env.step(action)
+            info = info[0]
             print(
-                "[{}] {}\n{}\n{}\n".format(
-                    ts, info[0]["state"], info[0]["actions"], info[0]["rewards"]
+                "[{}] {}\n{}\n{}\n{}\n".format(
+                    ts,
+                    setpoint,
+                    info["state"],
+                    info["actions"],
+                    info["rewards"],
                 )
             )
             end_state = obs
             ep_reward += rewards
+
+            ep_actions[ts] = [*info["actions"].values()]  # save
+            ep_states[ts] = list(itertools.chain(*info["state"].values()))  # save
 
         # after episode
         print(
@@ -530,10 +551,10 @@ def test(model_type: str, params):
         t_setpoint = np.tile(setpoint, (ep_length, 1))
         title = f"{model_type}:{model_name}"
         plot_trim_with_setpoint(
-            title, episode, plot_test_dir, t, states, actions, t_setpoint
+            title, episode, plot_test_dir, ep_t, ep_states, ep_actions, t_setpoint
         )
-        plot_traj_3d(title, episode, plot_test_dir, t, states, setpoint)
-        plot_traj_2d(title, episode, plot_test_dir, t, states, setpoint)
+        plot_traj_3d(title, episode, plot_test_dir, ep_t, ep_states, setpoint)
+        plot_traj_2d(title, episode, plot_test_dir, ep_t, ep_states, setpoint)
 
 
 if __name__ == "__main__":
@@ -580,15 +601,38 @@ if __name__ == "__main__":
     model_path = model_dir + start_time
 
     train_param = {
-        "episode_length": 3000,  # 10s of sim flight per episode
-        "total_episodes": 6000,
-        "num_cpu": 1,
+        "env_state": dict(
+            x=200,
+            # y=200,
+            z=200,
+            # phi=10,
+            theta=10,
+            # psi=10,
+            u=30,
+            # v=30,
+            w=30,
+            # p=30,
+            q=30,
+            # r=30,
+        ),  # define observed state and its max values
+        "env_actions": dict(
+            # rpm=1,
+            # de=2,
+            # dr=3,
+            lcg=4,
+            vbs=5,
+        ),  # define available actions and its position in action_6d vector
+        ######
         "off_policy_kwargs": dict(
             net_arch=dict(pi=[64, 64], qf=[64, 64])
         ),  # for off-policy only
         "on_policy_kwargs": dict(
             net_arch=[dict(pi=[64, 64], vf=[64, 64])]
         ),  # for on-policy only
+        ######
+        "episode_length": 3000,  # 10s of sim flight per episode
+        "total_episodes": 6000,
+        "num_cpu": 1,
         "learning_rate": 0.001,
         "buffer_size": int(1e6),
         "learning_starts": 128,

@@ -257,65 +257,80 @@ class EnvEOMGym(gym.Env):
     Learns to control trim (depth and pitch angle)
     """
 
-    def __init__(self, episode_length, num_envs=1):
+    def __init__(self, episode_length, env_obs_states, env_actions, num_envs=1):
         super(EnvEOMGym, self).__init__()
-        action_high = np.ones(2)
+
+        self.env_obs_states = env_obs_states  # defined in params
+        self.env_actions = env_actions
+        self.key_to_state_map = {
+            "x": 0,
+            "y": 1,
+            "z": 2,
+            "phi": 3,
+            "theta": 4,
+            "psi": 5,
+            "u": 6,
+            "v": 7,
+            "w": 8,
+            "p": 9,
+            "q": 10,
+            "r": 11,
+        }
+
+        action_size = len(env_actions)
+        action_high = np.ones(action_size)
         self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
 
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        obs_high = np.array(
-            [400.0, 400.0, 400.0, 1.58, 1.58, 1.58, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
-        )
+        obs_high = self._make_obs_high()
         self.observation_space = gym.spaces.Box(low=-obs_high, high=obs_high)
         self.ep_length = episode_length
         self.current_step = 0
         self.num_resets = 0
         self.num_envs = num_envs
 
-        # For logger
-        self.reward = 0
-        self.state = np.zeros(12)
-
         # EOM simulation
         self.init_state = self._reset_uniform()
-        self.prev_action = np.zeros(2)
-        self.env = EnvEOM(self.init_state)
+        self.prev_action = np.zeros(action_size)
+        self.dynamics = EnvEOM(self.init_state)
 
-    def step(self, action):
-        # action_6d = np.concatenate(([action[0]], action)) # append rpm
-        # action_6d = np.array([action[0], action[0], 0.0, action[2], 0.0, 0.0])
-        action_6d = np.array([0.0, 0.0, 0.0, 0.0, action[0], action[1]])
+        # For logger, accessed with 'get_attr'
+        self.reward = 0
+        self.full_state = np.zeros(12)
 
-        t, state = self.env.step(action_6d)  # 12d
+        print(
+            f"Running with Env:\n\
+            Observed states:{env_obs_states.keys()}\n\
+            Obs state high:{obs_high}\n\
+            Actions:{env_actions.keys()}\n"
+        )
 
-        self.state = self._get_obs()  # for plotting
+    def _make_obs_high(self):
+        obs_high = []
+        for key in self.env_obs_states.keys():
+            value = self.env_obs_states[key]
+            obs_high.append(value)
+        return np.array(obs_high)
 
-        # self.reward, reward_info = self._calculate_reward(self.state, action)
-        # self.reward, reward_info = self._calculate_reward_xy(self.state, action)
-        self.reward, reward_info = self._calculate_reward_trim(self.state, action)
+    def _make_action_6d(self, input_action):
+        action_6d = np.zeros(6)
+        for i, key in enumerate(self.env_actions):
+            pos = self.env_actions[key]
+            value = input_action[i]
+            action_6d[pos] = value
+            if key == "rpm":
+                action_6d[0] = value  # rpm is the same for both propellers
+        return action_6d
 
-        self.prev_action = action
-        self.current_step += 1
-        done = self.current_step >= self.ep_length
-
-        info_state = {
-            "xyz": self.state[0:3].round(2).tolist(),
-            "rpy": self.state[3:6].round(2).tolist(),
-        }
-        action_6d = action_6d.round(2).tolist()
-        info_actions = {
-            "rpm": action_6d[1],
-            "de": action_6d[2],
-            "dr": action_6d[3],
-            "lcg": action_6d[4],
-            "vbs": action_6d[5],
-        }
-        info = {"rewards": reward_info, "state": info_state, "actions": info_actions}
-
-        return self.state, self.reward, done, info
-
-    def set_init_state(self, init_state):
-        self.init_state = init_state
+    def _get_obs(self):
+        """return observed state from 12d state dynamics"""
+        state_12d = self.dynamics.get_state()
+        obs = []
+        for key in self.key_to_state_map.keys():
+            if key in self.env_obs_states:
+                state_pos = self.key_to_state_map[key]
+                obs.append(state_12d[state_pos])
+        return np.array(obs)
 
     def _reset_uniform(self):
         xyz = np.random.uniform(-5, 5, 3)
@@ -330,13 +345,50 @@ class EnvEOMGym(gym.Env):
         )
         return state
 
+    def step(self, action):
+        action_6d = self._make_action_6d(action)
+
+        t, full_state = self.dynamics.step(action_6d)  # 12d
+        self.full_state = full_state  # for plotting in tensorboard
+
+        observed_state = self._get_obs()
+
+        # self.reward, reward_info = self._calculate_reward(observed_state, action)
+        # self.reward, reward_info = self._calculate_reward_xy(observed_state, action)
+        self.reward, reward_info = self._calculate_reward_trim(observed_state, action)
+
+        self.prev_action = action
+        self.current_step += 1
+        done = self.current_step >= self.ep_length
+
+        info_state = {
+            "xyz": full_state[0:3].round(2).tolist(),
+            "rpy": full_state[3:6].round(2).tolist(),
+            "uvw": full_state[6:9].round(2).tolist(),
+            "pqr": full_state[9:12].round(2).tolist(),
+        }
+        action_6d = action_6d.round(2).tolist()
+        info_actions = {
+            "rpm": action_6d[1],
+            "de": action_6d[2],
+            "dr": action_6d[3],
+            "lcg": action_6d[4],
+            "vbs": action_6d[5],
+        }
+        info = {"rewards": reward_info, "state": info_state, "actions": info_actions}
+
+        return observed_state, self.reward, done, info
+
+    def set_init_state(self, init_state):
+        self.init_state = init_state
+
     def reset(self):
         self.current_step = 0
         self.num_resets += 1
 
         # state = self.init_state
         state = self._reset_uniform()
-        self.env.set_state(state)
+        self.dynamics.set_state(state)
         return self._get_obs()
 
     def render(self, mode="human"):
@@ -344,10 +396,6 @@ class EnvEOMGym(gym.Env):
 
     def close(self):
         pass
-
-    def _get_obs(self):
-        state = self.env.get_state()
-        return state
 
     def _calculate_reward_xy(self, state, action):
         """
@@ -450,7 +498,8 @@ class EnvEOMGym(gym.Env):
     def _calculate_reward_trim(self, state, action):
         # x, y, z, phi, theta, psi, u, v, w, p, q, r)
         Q = np.diag(
-            [0.0, 0.0, 0.01, 0.0, 0.03, 0.0, 0.0, 0.0, 0.03, 0.0, 0.0, 0.01]
+            [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
+            # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0, 0.0, 0.1, 0.3, 0.0, 0.3, 0.0]
         )  # z, pitch, v, q
         R = np.diag([0.03, 0.03])  # weights on controls
         R_r = np.diag([0.3, 0.3])  # weights on rates
