@@ -24,67 +24,57 @@
 
 import os
 import argparse
-import numpy as np
-
+import itertools
 import rospy
+import numpy as np
 from env.env_stonefish import SAMEnv
+from stable_baselines3 import TD3, DDPG, SAC, PPO
 
-from stable_baselines3 import TD3
 
+def test(model_type: str, model_path: str, env: SAMEnv, max_timesteps: int):
+    """Run model in stonefish"""
 
-def test(
-    model_type : str,
-    model_path : str,
-    env_path : str,
-    env : SAMEnv,
-    max_timesteps : int,
-    setpoints : np.array
-    ):
-
-    assert os.path.exists(model_path), f'Model {model_path} does not exist.'
-    assert os.path.exists(env_path), f'Env {env_path} does not exist.'
-    assert setpoints.shape[1] == 12, f'Setpoint state dimensions are incorrect (should be 12)'
-
-    print(f'Loading model {model_path}...')
-    print(f'Loading env statistics {env_path}...')
-    if model_type == 'ddpg':
-        model = DDPG.load(path=model_paths)
-    elif model_type == 'td3':
+    print(f"Loading model {model_path}...")
+    if model_type == "ddpg":
+        model = DDPG.load(path=model_path)
+    elif model_type == "td3":
         model = TD3.load(path=model_path)
-    elif model_type == 'sac':
+    elif model_type == "sac":
         model = SAC.load(path=model_path)
-    elif model_type == 'ppo':
+    elif model_type == "ppo":
         model = PPO.load(path=model_path)
     print(model.policy)
 
-
     episode = 0
     while True:
-        print('New Episode')
+        print("New Episode")
 
         # Reset env
-        setpoint = env.current_setpoint
+        setpoint = env.get_current_setpoint()
         obs = env.reset()
-        start_state = obs
-        end_state = obs
 
         # for plots
-        actions = np.zeros([max_timesteps, env.action_dim])
-        states = np.zeros([max_timesteps, env.state_dim])
-        t = np.linspace(0, max_timesteps, max_timesteps).astype(int)
+        ep_actions = np.zeros([max_timesteps, 5])
+        ep_states = np.zeros([max_timesteps, 12])
+        ep_t = np.linspace(0, max_timesteps, max_timesteps).astype(int)
 
         ep_reward = 0
         for ts in range(max_timesteps):
-            states[ts] = obs    # save
-
-            obs -= setpoint     # will follow setpoint
+            obs -= setpoint  # will follow setpoint
             action, _states = model.predict(obs)
-
-            actions[ts] = action    # save
 
             obs, rewards, dones, info = env.step(action)
             end_state = obs
             ep_reward += rewards
+
+            ep_actions[ts] = [*info["actions"].values()]  # save
+            ep_states[ts] = list(itertools.chain(*info["state"].values()))  # save
+
+            print(
+                "[{}] {}\n{}\n{}\n{}\n{}\n".format(
+                    ts, setpoint, info["state"], info["actions"], info["rewards"], obs
+                )
+            )
 
         # after episode
         # print(f'[{episode}]\n \tsetpoint = {setpoint}\n \
@@ -93,45 +83,20 @@ def test(
         #                       \treward = {ep_reward}')
 
 
-if __name__ == "__main__":
+def run_node(params, model_path, model_type, train=False):
+    """Start the ROS node for SAM"""
+    assert os.path.exists(model_path), f"Model {model_path} does not exist."
     rospy.init_node("rl_trainer")
-    model_type = rospy.get_param("~model_type", default="td3")
+    env = SAMEnv(env_obs_states=params["env_state"], env_actions=params["env_actions"])
 
-    # define paths
-    base_dir = os.path.expanduser('~') + '/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/'
-    model_dir = base_dir
-    plot_dir = base_dir + 'plots/'
-    tensorboard_logs_dir = base_dir + 'tensorboard_logs/'
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    if not os.path.exists(plot_dir):
-        os.makedirs(plot_dir + 'train/')
-        os.makedirs(plot_dir + 'test/')
-    if not os.path.exists(tensorboard_logs_dir):
-        os.makedirs(tensorboard_logs_dir)
-
-    model_name = 'td3_999750_steps.zip'
-    env_name = 'td3_999750_steps_env.pkl'
-
-    env_path = model_dir + env_name
-    model_path = model_dir + model_name
-
-    env = SAMEnv()
-
-    #define setpoints
-    setpoints = np.array([
-        [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]
-        ])
-        # [0., 5., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
-        # [5., 5., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
-        # [-5., 5., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
-        # [5., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
-        # [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]
-        # ])
-
-    test(model_type=model_type,
-         model_path=model_path,
-         env_path=env_path,
-         env=env,
-         max_timesteps=500,
-         setpoints=setpoints)
+    if train:
+        raise NotImplementedError(
+            "Training in stonefish environment is not implemented."
+        )
+    else:
+        test(
+            model_type=model_type,
+            model_path=model_path,
+            env=env,
+            max_timesteps=500,
+        )

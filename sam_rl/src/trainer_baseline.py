@@ -75,12 +75,12 @@ class TensorboardCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         reward = self.training_env.get_attr("reward")[0]
-        state = self.training_env.get_attr("full_state")[0]
-        action = self.training_env.get_attr("prev_action")[0]
+        # state = self.training_env.get_attr("full_state")[0]
+        # action = self.training_env.get_attr("prev_action")[0]
 
         self.reward += reward
-        self.states[self.ts] = state
-        self.actions[self.ts] = action
+        # self.states[self.ts] = state
+        # self.actions[self.ts] = action
         self.ts += 1
 
         return True
@@ -210,7 +210,8 @@ def train(model_type: str, params):
     """Start training"""
 
     ep_length = params["episode_length"]
-
+    env_state_dict = params["env_state"]
+    env_actions_dict = params["env_actions"]
     # env = SubprocVecEnv([make_env(i, ep_length) for i in range(params["num_cpu"])])
     # env = VecMonitor(venv=env)
     # env = VecNormalize(
@@ -222,7 +223,7 @@ def train(model_type: str, params):
     #     gamma=0.99,
     # )
 
-    env = EnvEOMGym(ep_length)
+    env = EnvEOMGym(ep_length, env_state_dict, env_actions_dict)
     env = Monitor(env)
     env = DummyVecEnv([lambda: env])
 
@@ -237,7 +238,7 @@ def train(model_type: str, params):
     #     clip_obs=40.0,
     #     gamma=0.99,
     # )
-    eval_env = EnvEOMGym(ep_length)
+    eval_env = EnvEOMGym(ep_length, env_state_dict, env_actions_dict)
     eval_env = Monitor(eval_env)
     eval_env = DummyVecEnv([lambda: eval_env])
 
@@ -443,8 +444,8 @@ def test(model_type: str, params):
 
     model_name = "15.53.43-03.16.2022/td3_240000_steps.zip"  # gray
     # model_name = "10.22.55-03.16.2022/td3_3600000_steps.zip"  # green
-    # model_name = "10.21.56-03.16.2022/td3_840000_steps.zip"  # red
-    # model_name = "10.21.11-03.16.2022/td3_840000_steps.zip"  # blue
+    # model_name = "10.21.56-03.16.2022/td3_3600000_steps.zip"  # red
+    # model_name = "10.21.11-03.16.2022/td3_3600000_steps.zip"  # blue
     env_name = "13.36.38-03.15.2022/td3_1050000_steps_env.pkl"
 
     env_path = params["model_dir"] + env_name
@@ -577,9 +578,22 @@ if __name__ == "__main__":
         help="Train new model if true",
     )
 
+    parser.add_argument(
+        "--env",
+        "-e",
+        dest="env",
+        type=str,
+        nargs="?",
+        required=True,
+        default="eom",
+        choices=["eom", "stonefish"],
+        help="Choose the environment",
+    )
+
     args = parser.parse_args()
 
     assert args.model is not None, "Invalid argument for --model"
+    assert args.env is not None, "Invalid argument for --env"
 
     base_dir = (
         os.path.expanduser("~")
@@ -603,17 +617,17 @@ if __name__ == "__main__":
     train_param = {
         "env_state": dict(
             x=200,
-            # y=200,
+            y=200,
             z=200,
-            # phi=10,
+            phi=10,
             theta=10,
-            # psi=10,
+            psi=10,
             u=30,
-            # v=30,
+            v=30,
             w=30,
-            # p=30,
+            p=30,
             q=30,
-            # r=30,
+            r=30,
         ),  # define observed state and its max values
         "env_actions": dict(
             # rpm=1,
@@ -630,8 +644,8 @@ if __name__ == "__main__":
             net_arch=[dict(pi=[64, 64], vf=[64, 64])]
         ),  # for on-policy only
         ######
-        "episode_length": 3000,  # 10s of sim flight per episode
-        "total_episodes": 6000,
+        "episode_length": 600,  # 10s of sim flight per episode
+        "total_episodes": 5000,
         "num_cpu": 1,
         "learning_rate": 0.001,
         "buffer_size": int(1e6),
@@ -652,7 +666,24 @@ if __name__ == "__main__":
         "n_eval_episodes": 5,  # episodes
     }
 
-    if args.train:
-        train(args.model, train_param)
-    else:
-        test(args.model, train_param)
+    if args.env == "eom":
+        if args.train:
+            train(args.model, train_param)
+        else:
+            test(args.model, train_param)
+
+    elif args.env == "stonefish":
+        import trainer_stonefish
+
+        model_name = "15.53.43-03.16.2022/td3_240000_steps.zip"  # gray
+        env_name = "15.53.43-03.16.2022/td3_999750_steps_env.pkl"
+
+        env_path = model_dir + env_name
+        model_path = model_dir + model_name
+
+        trainer_stonefish.run_node(
+            params=train_param,
+            model_path=model_path,
+            model_type=args.model,
+            train=args.train,
+        )

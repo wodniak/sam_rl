@@ -498,8 +498,8 @@ class EnvEOMGym(gym.Env):
     def _calculate_reward_trim(self, state, action):
         # x, y, z, phi, theta, psi, u, v, w, p, q, r)
         Q = np.diag(
-            [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
-            # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0, 0.0, 0.1, 0.3, 0.0, 0.3, 0.0]
+            # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
+            [0.0, 0.0, 0.1, 0.0, 0.3, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0]
         )  # z, pitch, v, q
         R = np.diag([0.03, 0.03])  # weights on controls
         R_r = np.diag([0.3, 0.3])  # weights on rates
@@ -525,7 +525,7 @@ class EnvEOMGym(gym.Env):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    ep_length = 8000
+    ep_length = 7000
     env = EnvEOMGym(episode_length=ep_length, num_envs=1)
     action = np.array([-1, 0.0, 1.0, 0.0, 0.0])
 
