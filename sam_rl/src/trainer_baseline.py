@@ -29,6 +29,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
+import yaml
 
 from stable_baselines3 import DDPG, TD3, SAC, PPO
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
@@ -598,7 +599,6 @@ if __name__ == "__main__":
         choices=["ddpg", "td3", "sac", "ppo"],
         help="Choose the model",
     )
-
     parser.add_argument(
         "--train",
         "-t",
@@ -606,31 +606,44 @@ if __name__ == "__main__":
         action="store_true",
         help="Train new model if true",
     )
-
     parser.add_argument(
         "--env",
         "-e",
         dest="env",
         type=str,
         nargs="?",
-        required=True,
         default="eom",
         choices=["eom", "stonefish"],
         help="Choose the environment",
     )
-
+    parser.add_argument(
+        "--config",
+        "-c",
+        dest="config",
+        type=str,
+        nargs="?",
+        default="default",
+        choices=["trim_6d", "trim_12d"],
+        help="Choose the model",
+    )
     args = parser.parse_args()
 
     assert args.model is not None, "Invalid argument for --model"
     assert args.env is not None, "Invalid argument for --env"
 
+    # define directories
     base_dir = (
         os.path.expanduser("~")
         + "/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs/"
     )
+    config_dir = (
+        os.path.expanduser("~")
+        + "/catkin_ws/src/smarc_rl_controllers/sam_rl/src/config/"
+    )
     model_dir = base_dir + "model/"
     plot_dir = base_dir + "plots/"
     tensorboard_logs_dir = base_dir + "tensorboard_logs/"
+
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     if not os.path.exists(plot_dir):
@@ -639,111 +652,24 @@ if __name__ == "__main__":
     if not os.path.exists(tensorboard_logs_dir):
         os.makedirs(tensorboard_logs_dir)
 
+    # define paths
     start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
     tf_writer_path = tensorboard_logs_dir + start_time
     model_path = model_dir + start_time
+    config_path = config_dir + args.config + ".yaml"
 
-    train_param = {
-        "env_state": dict(
-            x=200,
-            y=200,
-            z=200,
-            phi=10,
-            theta=10,
-            psi=10,
-            u=30,
-            v=30,
-            w=30,
-            p=30,
-            q=30,
-            r=30,
-        ),  # define observed state and its max values (x, z, theta, u, w, q)
-        # "env_state": dict(
-        #     x=200,
-        #     # y=200,
-        #     z=200,
-        #     # phi=10,
-        #     theta=10,
-        #     # psi=10,
-        #     u=30,
-        #     # v=30,
-        #     w=30,
-        #     # p=30,
-        #     q=30,
-        #     # r=30,
-        # ),  # define observed state and its max values (x, z, theta, u, w, q)
-        "env_actions": dict(
-            # rpm=1,
-            # de=2,
-            # dr=3,
-            lcg=4,
-            vbs=5,
-        ),  # define available actions and its position in action_6d vector
-        ###### Q, R, R_r weight matrices for reward function
-        "env_state_weights_Q": dict(
-            x=0.0,
-            y=0.0,
-            z=0.1,
-            phi=0.0,
-            theta=0.3,
-            psi=0.0,
-            u=0.0,
-            v=0.0,
-            w=0.3,
-            p=0.0,
-            q=0.0,
-            r=0.0,
-        ),  # define Q
-        "env_actions_weights_R": dict(
-            rpm=0.03,
-            de=0.03,
-            dr=0.03,
-            lcg=0.03,
-            vbs=0.03,
-        ),  # define R
-        "env_actions_weights_R_r": dict(
-            rpm=0.3,
-            de=0.3,
-            dr=0.3,
-            lcg=0.3,
-            vbs=0.3,
-        ),  # define R_r
-        ###### Network architecture
-        "off_policy_kwargs": dict(
-            net_arch=dict(pi=[64, 64], qf=[64, 64])
-        ),  # for off-policy only
-        "on_policy_kwargs": dict(
-            net_arch=[dict(pi=[64, 64], vf=[64, 64])]
-        ),  # for on-policy only
-        ###### Training hyperparameters
-        "episode_length": 5000,  # 1000=10s of sim flight per episode
-        "total_episodes": 5000,
-        "num_cpu": 1,
-        "save_freq": 100,  # episodes
-        "eval_freq": 10,  # episodes
-        "n_eval_episodes": 5,  # episodes
-        ###### Network hyperparameters
-        "learning_rate": 0.001,
-        "buffer_size": int(1e6),
-        "learning_starts": 128,
-        "batch_size": 64,
-        "tau": 0.005,
-        "gamma": 0.99,
-        "train_freq": 5,  # episodes
-        "gradient_steps": -1,  # all accumulated
-        "sigma": 0.1,  # action noise
-        ###### Misc
-        "device": "auto",
-        "verbose": 0,
-        "tensorboard_log": tf_writer_path,
-        "model_dir": model_dir,
-    }
+    with open(config_path) as params:
+        # The FullLoader parameter handles the conversion from YAML
+        # scalar values to Python the dictionary format
+        parameter_dict = yaml.load(params, Loader=yaml.FullLoader)
+        parameter_dict["tensorboard_log"] = tf_writer_path
+        parameter_dict["model_dir"] = model_dir
 
     if args.env == "eom":
         if args.train:
-            train(args.model, train_param)
+            train(args.model, parameter_dict)
         else:
-            test(args.model, train_param)
+            test(args.model, parameter_dict)
 
     elif args.env == "stonefish":
         import trainer_stonefish
@@ -755,7 +681,7 @@ if __name__ == "__main__":
         model_path = model_dir + model_name
 
         trainer_stonefish.run_node(
-            params=train_param,
+            params=parameter_dict,
             model_path=model_path,
             model_type=args.model,
             train=args.train,

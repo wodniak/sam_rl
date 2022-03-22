@@ -1,0 +1,97 @@
+###### Training hyperparameters
+episode_length: 300  # 1000: 10s of sim flight per episode
+total_episodes: 5000
+num_cpu: 1
+save_freq: 100  # episodes
+eval_freq: 10  # episodes
+n_eval_episodes: 5  # episodes
+
+###### Environment state/actions
+# define observed state and its max values
+env_state:
+    x: 200
+    # y: 200
+    z: 200
+    # phi: 10
+    theta: 10
+    # psi: 10
+    u: 30
+    # v: 30
+    w: 30
+    # p: 30
+    q: 30
+    # r: 30
+# define available actions and its position in action_6d vector
+env_actions:
+    # rpm: 1
+    # de: 2
+    # dr: 3
+    lcg: 4
+    vbs: 5
+
+###### Q R R_r weight matrices for reward function
+# define Q
+env_state_weights_Q:
+    x: 0.0
+    y: 0.0
+    z: 0.1
+    phi: 0.0
+    theta: 0.3
+    psi: 0.0
+    u: 0.0
+    v: 0.0
+    w: 0.3
+    p: 0.0
+    q: 0.0
+    r: 0.0
+# define R
+env_actions_weights_R:
+    rpm: 0.03
+    de: 0.03
+    dr: 0.03
+    lcg: 0.03
+    vbs: 0.03
+# define R_r
+env_actions_weights_R_r:
+    rpm: 0.3
+    de: 0.3
+    dr: 0.3
+    lcg: 0.3
+    vbs: 0.3
+
+###### Network architecture
+# for off-policy only
+off_policy_kwargs:
+    net_arch:
+        pi:
+        - 64
+        - 64
+        qf:
+        - 64
+        - 64
+# for on-policy only
+on_policy_kwargs:
+    net_arch:
+        pi:
+        - 64
+        - 64
+        vf:
+        - 64
+        - 64
+
+###### Network hyperparameters
+learning_rate: 0.001
+buffer_size: 1000000
+learning_starts: 128
+batch_size: 64
+tau: 0.005
+gamma: 0.99
+train_freq: 5  # episodes
+gradient_steps: -1  # all accumulated
+sigma: 0.1  # action noise
+
+###### Misc
+device: "auto"
+verbose:  0
+tensorboard_log: null
+model_dir: null
