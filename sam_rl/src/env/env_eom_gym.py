@@ -257,7 +257,16 @@ class EnvEOMGym(gym.Env):
     Learns to control trim (depth and pitch angle)
     """
 
-    def __init__(self, episode_length, env_obs_states, env_actions, num_envs=1):
+    def __init__(
+        self,
+        episode_length,
+        env_obs_states,
+        env_actions,
+        weights_Q,
+        weights_R,
+        weights_R_r,
+        num_envs=1,
+    ):
         super(EnvEOMGym, self).__init__()
 
         self.env_obs_states = env_obs_states  # defined in params
@@ -277,6 +286,9 @@ class EnvEOMGym(gym.Env):
             "r": 11,
         }
 
+        self.reward_fn = RewardFnTrim(
+            env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
+        )
         action_size = len(env_actions)
         action_high = np.ones(action_size)
         self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
@@ -333,7 +345,7 @@ class EnvEOMGym(gym.Env):
         return np.array(obs)
 
     def _reset_uniform(self):
-        xyz = np.random.uniform(-5, 5, 3)
+        xyz = np.random.uniform(-10, 10, 3)
         rpy = np.random.uniform(-1.57, 1.57, 3)
         uvw = np.random.uniform(-2, 2, 3)
         pqr = np.random.uniform(-1, 1, 3)
@@ -352,10 +364,9 @@ class EnvEOMGym(gym.Env):
         self.full_state = full_state  # for plotting in tensorboard
 
         observed_state = self._get_obs()
-
-        # self.reward, reward_info = self._calculate_reward(observed_state, action)
-        # self.reward, reward_info = self._calculate_reward_xy(observed_state, action)
-        self.reward, reward_info = self._calculate_reward_trim(observed_state, action)
+        self.reward, reward_info = self.reward_fn.calculate_reward(
+            observed_state, action
+        )
 
         self.prev_action = action
         self.current_step += 1
@@ -397,23 +408,112 @@ class EnvEOMGym(gym.Env):
     def close(self):
         pass
 
-    def _calculate_reward_xy(self, state, action):
-        """
-        :param state: 12d state vector
-            x, y, z,
-            phi, theta, psi,
-            u, v, w,
-            p, q, r
-        :param action: 5d action vector
-        """
+
+class RewardFnBase(object):
+    """Define reward function weight matrices"""
+
+    def __init__(self, env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
+        # variables
+        self.state_dim = len(env_obs_states)
+        self.action_dim = len(env_actions)
+
+        self.Q = np.zeros(self.state_dim)
+        self.R = np.zeros(self.action_dim)
+        self.R_r = np.zeros(self.action_dim)
+        self.prev_action = np.zeros(self.action_dim)
+
+        # Fill Q matrix
+        for i, key in enumerate(env_obs_states):
+            if key in weights_Q:
+                value = weights_Q[key]
+                self.Q[i] = value
+
+        # Fill R and R_r matrices
+        for i, key in enumerate(env_actions):
+            if key in weights_R:
+                value_R = weights_R[key]
+                value_R_r = weights_R_r[key]
+                self.R[i] = value_R
+                self.R_r[i] = value_R_r
+
+        print(
+            f"Reward function:\n\
+            Q:{self.Q}\n\
+            R:{self.R}\n\
+            R_r:{self.R_r}\n"
+        )
+
+    def calculate_reward(self, state, action):
+        raise NotImplementedError()
+
+
+class RewardFnTrim(RewardFnBase):
+    def __init__(self, env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
+        super().__init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r)
+        # sanity checks
+        assert "z" in env_obs_states, "Missing env states for TRIM cost function"
+        assert "theta" in env_obs_states, "Missing env states for TRIM cost function"
+        assert "w" in env_obs_states, "Missing env states for TRIM cost function"
+        assert "q" in env_obs_states, "Missing env states for TRIM cost function"
+
+    def calculate_reward(self, state, action):
+        """Reward function for Trim"""
+        assert len(state) == self.state_dim
+        assert len(action) == self.action_dim
+
+        a_diff = action - self.prev_action
+        e_s = np.linalg.norm(
+            state * self.Q * state
+        )  # error on state, setpoint is all 0's
+        e_a = np.linalg.norm(action * self.R * action)  # error on actions
+        e_r = np.linalg.norm(a_diff * self.R_r * a_diff)  # error on action rates
+        e = e_s + e_a + e_r
+        error = np.maximum(0, 1.0 - e_s) - e_a - e_r
+
+        e_info = {
+            "e_total": round(error, 3),
+            "e_state": round(-e_s, 3),
+            "e_action": round(-e_a, 3),
+            "e_action_rate": round(-e_r, 3),
+        }
+
+        return error, e_info
+
+
+class RewardFnXY(RewardFnBase):
+    """Reward function for XY"""
+
+    def __init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
+        super().__init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r)
+        # sanity checks
+        assert "x" in env_obs_states, "Missing env states for XY cost function"
+        assert "y" in env_obs_states, "Missing env states for XY cost function"
+        assert "psi" in env_obs_states, "Missing env states for XY cost function"
+        assert "r" in env_obs_states, "Missing env states for XY cost function"
+
+    def calculate_reward(self, state, action):
+        assert len(state) == self.state_dim
+        assert len(action) == self.action_dim
+
         a_diff = action - self.prev_action
 
-        e_position = np.log(np.linalg.norm(state[0:3]))
-        e_orientation = 0.2 * np.linalg.norm(state[3:6])
-        e_lin_vel = 0.1 * np.linalg.norm(state[6:9])
-        e_ang_vel = 0.1 * np.linalg.norm(state[9:12])
-        e_action = 0.1 * np.linalg.norm(action)
-        e_action_rate = 0.1 * np.linalg.norm(a_diff)
+        if self.state_dim == 12:
+            e_position = np.log(np.linalg.norm(state[0:3]))
+            e_orientation = 0.2 * np.linalg.norm(state[3:6])
+            e_lin_vel = 0.1 * np.linalg.norm(state[6:9])
+            e_ang_vel = 0.1 * np.linalg.norm(state[9:12])
+            e_action = 0.1 * np.linalg.norm(action)
+            e_action_rate = 0.1 * np.linalg.norm(a_diff)
+        # assumed states: x,y,psi,u,v,r
+        elif self.state_dim == 6:
+            e_position = np.log(np.linalg.norm(state[0:2]))
+            e_orientation = 0.2 * np.linalg.norm(state[2:3])
+            e_lin_vel = 0.1 * np.linalg.norm(state[3:5])
+            e_ang_vel = 0.1 * np.linalg.norm(state[5:6])
+            e_action = 0.1 * np.linalg.norm(action)
+            e_action_rate = 0.1 * np.linalg.norm(a_diff)
+        else:
+            raise NotImplementedError("Other cases are not implemented.")
 
         dt = 0.01
         e_total = -dt * np.sum(
@@ -431,95 +531,6 @@ class EnvEOMGym(gym.Env):
         }
 
         return e_total, e_info
-
-    def _calculate_reward_xy2(self, state, action):
-        Q = np.diag(
-            [0.01, 0.01, 0.01, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.01, 0.01, 0.01]
-        )
-        R = np.diag([0.003, 0.003, 0.003, 0.003, 0.003])  # weights on controls
-        R_r = np.diag([0.003, 0.003, 0.003, 0.003, 0.003])  # weights on rates
-
-        a_diff = action - self.prev_action
-
-        e_s = np.linalg.norm(state * Q * state)  # error on state, setpoint is all 0's
-        e_a = np.linalg.norm(action * R * action)  # error on actions
-        e_r = np.linalg.norm(a_diff * R_r * a_diff)  # error on action rates
-        e = e_s + e_a + e_r
-        error = np.maximum(0, 1.0 - e_s) - e_a - e_r
-
-        e_info = {
-            "e_total": round(error, 3),
-            "e_state": round(-e_s, 3),
-            "e_action": round(-e_a, 3),
-            "e_action_rate": round(-e_r, 3),
-        }
-
-        return error, e_info
-
-    def _calculate_reward_xy3(self, state, action):
-        """
-        :param state: 12d state vector
-            x, y, z,
-            phi, theta, psi,
-            u, v, w,
-            p, q, r
-        :param action: 5d action vector
-        """
-        a_diff = action - self.prev_action
-
-        e_position = 1 / (np.linalg.norm(state[0:3]) + 1)
-        e_orientation = 1 / (np.linalg.norm(state[0:6]) + 1)
-        e_lin_vel = 1 / (np.linalg.norm(state[6:9]) + 1)
-        e_ang_vel = 1 / (np.linalg.norm(state[9:12]) + 1)
-        e_action = 1 / (np.linalg.norm(action) + 1)
-        e_action_rate = 1 / (np.linalg.norm(a_diff) + 1)
-
-        e_total = (
-            0.56 * e_position
-            + 0.2 * e_orientation
-            + 0.02 * e_lin_vel
-            + 0.02 * e_ang_vel
-            + 0.1 * e_action
-            + 0.1 * e_action_rate
-        )
-
-        e_info = {
-            "e_total": round(e_total, 3),
-            "e_position": round(e_position, 3),
-            "e_orientation": round(e_orientation, 3),
-            "e_lin_vel": round(e_lin_vel, 3),
-            "e_ang_vel": round(e_ang_vel, 3),
-            "e_action": round(e_action, 3),
-            "e_action_rate": round(e_action_rate, 3),
-        }
-
-        return e_total, e_info
-
-    def _calculate_reward_trim(self, state, action):
-        # x, y, z, phi, theta, psi, u, v, w, p, q, r)
-        Q = np.diag(
-            # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
-            [0.0, 0.0, 0.1, 0.0, 0.3, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0]
-        )  # z, pitch, v, q
-        R = np.diag([0.03, 0.03])  # weights on controls
-        R_r = np.diag([0.3, 0.3])  # weights on rates
-
-        a_diff = action - self.prev_action
-
-        e_s = np.linalg.norm(state * Q * state)  # error on state, setpoint is all 0's
-        e_a = np.linalg.norm(action * R * action)  # error on actions
-        e_r = np.linalg.norm(a_diff * R_r * a_diff)  # error on action rates
-        e = e_s + e_a + e_r
-        error = np.maximum(0, 1.0 - e_s) - e_a - e_r
-
-        e_info = {
-            "e_total": round(error, 3),
-            "e_state": round(-e_s, 3),
-            "e_action": round(-e_a, 3),
-            "e_action_rate": round(-e_r, 3),
-        }
-
-        return error, e_info
 
 
 if __name__ == "__main__":

@@ -223,7 +223,15 @@ def train(model_type: str, params):
     #     gamma=0.99,
     # )
 
-    env = EnvEOMGym(ep_length, env_state_dict, env_actions_dict)
+    env = EnvEOMGym(
+        params["episode_length"],
+        params["env_state"],
+        params["env_actions"],
+        weights_Q=params["env_state_weights_Q"],
+        weights_R=params["env_actions_weights_R"],
+        weights_R_r=params["env_actions_weights_R_r"],
+        num_envs=params["num_cpu"],
+    )
     env = Monitor(env)
     env = DummyVecEnv([lambda: env])
 
@@ -238,7 +246,15 @@ def train(model_type: str, params):
     #     clip_obs=40.0,
     #     gamma=0.99,
     # )
-    eval_env = EnvEOMGym(ep_length, env_state_dict, env_actions_dict)
+    eval_env = EnvEOMGym(
+        params["episode_length"],
+        params["env_state"],
+        params["env_actions"],
+        weights_Q=params["env_state_weights_Q"],
+        weights_R=params["env_actions_weights_R"],
+        weights_R_r=params["env_actions_weights_R_r"],
+        num_envs=params["num_cpu"],
+    )
     eval_env = Monitor(eval_env)
     eval_env = DummyVecEnv([lambda: eval_env])
 
@@ -442,10 +458,14 @@ def test(model_type: str, params):
         fig.suptitle(title)
         plt.savefig(plot_dir + f"{epoch}_traj_2d")
 
-    model_name = "15.53.43-03.16.2022/td3_240000_steps.zip"  # gray
-    # model_name = "10.22.55-03.16.2022/td3_3600000_steps.zip"  # green
-    # model_name = "10.21.56-03.16.2022/td3_3600000_steps.zip"  # red
-    # model_name = "10.21.11-03.16.2022/td3_3600000_steps.zip"  # blue
+    # model_name = "15.53.43-03.16.2022/td3_240000_steps.zip"  # gray 6d
+    # model_name = "09.39.38-03.21.2022/td3_420000_steps.zip"  # red 6d
+    # model_name = "12.32.46-03.21.2022/td3_240000_steps.zip"  # pink 6d
+    # model_name = "08.53.18-03.22.2022/td3_300000_steps.zip"  # orange 6d
+
+    model_name = "08.52.04-03.22.2022/td3_510000_steps.zip"  # gray 12d
+    # model_name = "09.43.06-03.21.2022/td3_420000_steps.zip"  # blue 12d
+
     env_name = "13.36.38-03.15.2022/td3_1050000_steps_env.pkl"
 
     env_path = params["model_dir"] + env_name
@@ -454,7 +474,13 @@ def test(model_type: str, params):
     # env_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/td3_999750_steps_env.pkl"
 
     env = EnvEOMGym(
-        params["episode_length"], params["env_state"], params["env_actions"]
+        params["episode_length"],
+        params["env_state"],
+        params["env_actions"],
+        weights_Q=params["env_state_weights_Q"],
+        weights_R=params["env_actions_weights_R"],
+        weights_R_r=params["env_actions_weights_R_r"],
+        num_envs=params["num_cpu"],
     )
     check_env(env)
     env = Monitor(env)
@@ -481,29 +507,32 @@ def test(model_type: str, params):
     state_dim = env.get_attr("observation_space", 0)[0].shape[-1]
 
     # define setpoints
-    # setpoints = np.array(
-    #     [
-    #         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    #         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    #         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    #         # [5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    #         # [0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    #         # [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    #     ]
-    # )
-
+    if state_dim == 12:
+        setpoints = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                # [5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                # [0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                # [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ]
+        )
     # (x, z, theta, u, w, q)
-    setpoints = np.array(
-        [
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 5.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 5.0, 0.5, 0.0, 0.0, 0.0],
-            [0.0, -3.0, 0.5, 0.0, 0.0, 0.0],
-            [0.0, -3.0, -0.5, 0.0, 0.0, 0.0],
-            [0.0, 10.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, -10.0, 0.0, 0.0, 0.0, 0.0],
-        ]
-    )
+    if state_dim == 6:
+        setpoints = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 5.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 5.0, 0.5, 0.0, 0.0, 0.0],
+                [0.0, -3.0, 0.5, 0.0, 0.0, 0.0],
+                [0.0, -3.0, -0.5, 0.0, 0.0, 0.0],
+                [0.0, 10.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, -10.0, 0.0, 0.0, 0.0, 0.0],
+            ]
+        )
 
     num_setpoints = setpoints.shape[0]
     for episode in range(num_setpoints):
@@ -628,7 +657,21 @@ if __name__ == "__main__":
             p=30,
             q=30,
             r=30,
-        ),  # define observed state and its max values
+        ),  # define observed state and its max values (x, z, theta, u, w, q)
+        # "env_state": dict(
+        #     x=200,
+        #     # y=200,
+        #     z=200,
+        #     # phi=10,
+        #     theta=10,
+        #     # psi=10,
+        #     u=30,
+        #     # v=30,
+        #     w=30,
+        #     # p=30,
+        #     q=30,
+        #     # r=30,
+        # ),  # define observed state and its max values (x, z, theta, u, w, q)
         "env_actions": dict(
             # rpm=1,
             # de=2,
@@ -636,34 +679,64 @@ if __name__ == "__main__":
             lcg=4,
             vbs=5,
         ),  # define available actions and its position in action_6d vector
-        ######
+        ###### Q, R, R_r weight matrices for reward function
+        "env_state_weights_Q": dict(
+            x=0.0,
+            y=0.0,
+            z=0.1,
+            phi=0.0,
+            theta=0.3,
+            psi=0.0,
+            u=0.0,
+            v=0.0,
+            w=0.3,
+            p=0.0,
+            q=0.0,
+            r=0.0,
+        ),  # define Q
+        "env_actions_weights_R": dict(
+            rpm=0.03,
+            de=0.03,
+            dr=0.03,
+            lcg=0.03,
+            vbs=0.03,
+        ),  # define R
+        "env_actions_weights_R_r": dict(
+            rpm=0.3,
+            de=0.3,
+            dr=0.3,
+            lcg=0.3,
+            vbs=0.3,
+        ),  # define R_r
+        ###### Network architecture
         "off_policy_kwargs": dict(
             net_arch=dict(pi=[64, 64], qf=[64, 64])
         ),  # for off-policy only
         "on_policy_kwargs": dict(
             net_arch=[dict(pi=[64, 64], vf=[64, 64])]
         ),  # for on-policy only
-        ######
-        "episode_length": 600,  # 10s of sim flight per episode
+        ###### Training hyperparameters
+        "episode_length": 5000,  # 1000=10s of sim flight per episode
         "total_episodes": 5000,
         "num_cpu": 1,
+        "save_freq": 100,  # episodes
+        "eval_freq": 10,  # episodes
+        "n_eval_episodes": 5,  # episodes
+        ###### Network hyperparameters
         "learning_rate": 0.001,
         "buffer_size": int(1e6),
         "learning_starts": 128,
         "batch_size": 64,
         "tau": 0.005,
         "gamma": 0.99,
-        "device": "auto",
         "train_freq": 5,  # episodes
         "gradient_steps": -1,  # all accumulated
-        "verbose": 0,
         "sigma": 0.1,  # action noise
+        ###### Misc
+        "device": "auto",
+        "verbose": 0,
         "tensorboard_log": tf_writer_path,
-        "model_path": model_path,
         "model_dir": model_dir,
-        "save_freq": 100,  # episodes
-        "eval_freq": 10,  # episodes
-        "n_eval_episodes": 5,  # episodes
     }
 
     if args.env == "eom":
