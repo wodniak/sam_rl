@@ -12,6 +12,14 @@ test_episode_length: 3000
 ###### Environment state/actions
 env_dt: 0.01
 env_reward_fn_type: "xy"
+# define normalization
+env_use_vecnormalize: False
+vecnormalize:
+    training: True
+    norm_obs: True
+    norm_reward: False
+    clip_obs: 40.0
+    gamma: 0.99
 # define observed state and its max values
 env_state:
     x: 200
