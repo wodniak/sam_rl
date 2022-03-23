@@ -1,5 +1,5 @@
 ###### Training hyperparameters
-episode_length: 300  # 1000: 10s of sim flight per episode
+episode_length: 400  # 1000: 10s of sim flight per episode
 total_episodes: 5000
 num_cpu: 1
 save_freq: 100  # episodes
@@ -15,63 +15,60 @@ env_reward_fn_type: "trim"
 # define observed state and its max values
 env_state:
     x: 200
-    z: 200
-    theta: 10
+    y: 200
+    psi: 10
     u: 30
     w: 30
-    q: 30
+    r: 30
 # reset at random uniformly each episode, given max values. Other vars are 0's
 env_state_reset:
-    z: 10
-    theta: 1.57
+    x: 10
+    y: 10
+    psi: 1.57
 # define available actions and its position in action_6d vector
 env_actions:
-    # rpm: 1
+    rpm: 1
     # de: 2
-    # dr: 3
-    lcg: 4
-    vbs: 5
+    dr: 3
+    # lcg: 4
+    # vbs: 5
 
 ###### Q R R_r weight matrices for reward function
 # define Q
 env_state_weights_Q:
-    x: 0.0
-    y: 0.0
-    z: 0.1
-    phi: 0.0
-    theta: 0.3
-    psi: 0.0
-    u: 0.0
-    v: 0.0
-    w: 0.3
-    p: 0.0
-    q: 0.0
-    r: 0.0
+    x: 0.1
+    y: 0.1
+    z: 0.01
+    phi: 0.03
+    theta: 0.03
+    psi: 0.03
+    u: 0.03
+    v: 0.03
+    w: 0.03
+    p: 0.01
+    q: 0.01
+    r: 0.01
 # define R
 env_actions_weights_R:
-    rpm: 0.03
-    de: 0.03
-    dr: 0.03
-    lcg: 0.03
-    vbs: 0.03
+    rpm: 0.003
+    de: 0.003
+    dr: 0.003
+    lcg: 0.003
+    vbs: 0.003
 # define R_r
 env_actions_weights_R_r:
-    rpm: 0.3
-    de: 0.3
-    dr: 0.3
-    lcg: 0.3
-    vbs: 0.3
+    rpm: 0.003
+    de: 0.003
+    dr: 0.003
+    lcg: 0.003
+    vbs: 0.003
 
 ###### Network architecture
 # for off-policy only
 off_policy_kwargs:
     net_arch:
-        pi:
-        - 64
-        - 64
-        qf:
-        - 64
-        - 64
+        pi: [64, 64]
+        qf: [64, 64]
 # for on-policy only
 on_policy_kwargs:
     net_arch: [
@@ -81,7 +78,7 @@ on_policy_kwargs:
 
 ###### Network hyperparameters
 learning_rate: 0.001
-buffer_size: 1000000
+buffer_size: 1000000 # 1e6
 learning_starts: 128
 batch_size: 64
 tau: 0.005

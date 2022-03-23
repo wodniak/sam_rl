@@ -6,7 +6,12 @@ save_freq: 100  # episodes
 eval_freq: 10  # episodes
 n_eval_episodes: 5  # episodes
 
+###### Testing hyperparameters
+test_episode_length: 3000
+
 ###### Environment state/actions
+env_dt: 0.2
+env_reward_fn_type: "trim"
 # define observed state and its max values
 env_state:
     x: 200
@@ -21,6 +26,10 @@ env_state:
     p: 30
     q: 30
     r: 30
+# reset at random uniformly each episode, given max values. Other vars are 0's
+env_state_reset:
+    z: 10
+    theta: 1.57
 # define available actions and its position in action_6d vector
 env_actions:
     # rpm: 1
@@ -71,13 +80,10 @@ off_policy_kwargs:
         - 64
 # for on-policy only
 on_policy_kwargs:
-    net_arch:
-        pi:
-        - 64
-        - 64
-        vf:
-        - 64
-        - 64
+    net_arch: [
+        pi: [64, 64],
+        qf: [64, 64]
+    ]
 
 ###### Network hyperparameters
 learning_rate: 0.001

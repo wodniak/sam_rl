@@ -82,9 +82,9 @@ class EnvEOM(object):
         @note : values are in different ranges, scaled in eom function
     """
 
-    def __init__(self, init_state):
+    def __init__(self, dt, init_state):
         self.timestep = 0.0
-        self.dt = 0.01  # time step
+        self.dt = dt  # time step
 
         # system tolerances
         self.atol = 1e-8
@@ -260,8 +260,11 @@ class EnvEOMGym(gym.Env):
     def __init__(
         self,
         episode_length,
+        dt,
         env_obs_states,
+        env_obs_state_reset,
         env_actions,
+        env_reward_fn_type,
         weights_Q,
         weights_R,
         weights_R_r,
@@ -270,6 +273,7 @@ class EnvEOMGym(gym.Env):
         super(EnvEOMGym, self).__init__()
 
         self.env_obs_states = env_obs_states  # defined in params
+        self.env_obs_state_reset = env_obs_state_reset
         self.env_actions = env_actions
         self.key_to_state_map = {
             "x": 0,
@@ -286,9 +290,17 @@ class EnvEOMGym(gym.Env):
             "r": 11,
         }
 
-        self.reward_fn = RewardFnTrim(
-            env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
-        )
+        if env_reward_fn_type == "trim":
+            self.reward_fn = RewardFnTrim(
+                env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
+            )
+        elif env_reward_fn_type == "xy":
+            self.reward_fn = RewardFnXY(
+                env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
+            )
+        else:
+            self.reward_fn = None
+
         action_size = len(env_actions)
         action_high = np.ones(action_size)
         self.action_space = gym.spaces.Box(low=-action_high, high=action_high)
@@ -304,7 +316,7 @@ class EnvEOMGym(gym.Env):
         # EOM simulation
         self.init_state = self._reset_uniform()
         self.prev_action = np.zeros(action_size)
-        self.dynamics = EnvEOM(self.init_state)
+        self.dynamics = EnvEOM(dt, self.init_state)
 
         # For logger, accessed with 'get_attr'
         self.reward = 0
@@ -345,21 +357,17 @@ class EnvEOMGym(gym.Env):
         return np.array(obs)
 
     def _reset_uniform(self):
-        xyz = np.random.uniform(-10, 10, 3)
-        rpy = np.random.uniform(-1.57, 1.57, 3)
-        uvw = np.random.uniform(-2, 2, 3)
-        pqr = np.random.uniform(-1, 1, 3)
-
         # x, y, z, phi, theta, psi, u, v, w, p, q, r
-        state = np.array(
-            # [xyz[0], xyz[1], 0.0, 0.0, 0.0, rpy[2], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-            [0.0, 0.0, xyz[2], 0.0, rpy[1], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        )
+        state = np.zeros(12)
+        for key in self.env_obs_state_reset.keys():
+            value = self.env_obs_state_reset[key]
+            pos = self.key_to_state_map[key]
+            state[pos] = np.random.uniform(-value, value, 1)
         return state
 
     def step(self, action):
         action_6d = self._make_action_6d(action)
-
+        # action_6d = np.array([action[0], action[0], 0.0, action[2], 0.0, 0.0])
         t, full_state = self.dynamics.step(action_6d)  # 12d
         self.full_state = full_state  # for plotting in tensorboard
 
@@ -451,10 +459,10 @@ class RewardFnTrim(RewardFnBase):
     def __init__(self, env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
         super().__init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r)
         # sanity checks
-        assert "z" in env_obs_states, "Missing env states for TRIM cost function"
-        assert "theta" in env_obs_states, "Missing env states for TRIM cost function"
-        assert "w" in env_obs_states, "Missing env states for TRIM cost function"
-        assert "q" in env_obs_states, "Missing env states for TRIM cost function"
+        # assert "z" in env_obs_states, "Missing env states for TRIM cost function"
+        # assert "theta" in env_obs_states, "Missing env states for TRIM cost function"
+        # assert "w" in env_obs_states, "Missing env states for TRIM cost function"
+        # assert "q" in env_obs_states, "Missing env states for TRIM cost function"
 
     def calculate_reward(self, state, action):
         """Reward function for Trim"""
@@ -483,7 +491,7 @@ class RewardFnTrim(RewardFnBase):
 class RewardFnXY(RewardFnBase):
     """Reward function for XY"""
 
-    def __init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
+    def __init__(self, env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
         super().__init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r)
         # sanity checks
         assert "x" in env_obs_states, "Missing env states for XY cost function"
@@ -515,7 +523,7 @@ class RewardFnXY(RewardFnBase):
         else:
             raise NotImplementedError("Other cases are not implemented.")
 
-        dt = 0.01
+        dt = 0.2
         e_total = -dt * np.sum(
             [e_position, e_orientation, e_lin_vel, e_ang_vel, e_action, e_action_rate]
         )

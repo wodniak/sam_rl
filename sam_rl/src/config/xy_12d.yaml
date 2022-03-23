@@ -10,43 +10,50 @@ n_eval_episodes: 5  # episodes
 test_episode_length: 3000
 
 ###### Environment state/actions
-env_dt: 0.2
-env_reward_fn_type: "trim"
+env_dt: 0.01
+env_reward_fn_type: "xy"
 # define observed state and its max values
 env_state:
     x: 200
+    y: 200
     z: 200
+    phi: 10
     theta: 10
+    psi: 10
     u: 30
+    v: 30
     w: 30
+    p: 30
     q: 30
+    r: 30
 # reset at random uniformly each episode, given max values. Other vars are 0's
 env_state_reset:
-    z: 10
-    theta: 1.57
+    x: 10
+    y: 10
+    psi: 1.57
 # define available actions and its position in action_6d vector
 env_actions:
-    # rpm: 1
-    # de: 2
-    # dr: 3
+    rpm: 1
+    de: 2
+    dr: 3
     lcg: 4
     vbs: 5
 
 ###### Q R R_r weight matrices for reward function
 # define Q
 env_state_weights_Q:
-    x: 0.0
-    y: 0.0
-    z: 0.1
+    x: 0.1
+    y: 0.1
+    z: 0.0
     phi: 0.0
-    theta: 0.3
-    psi: 0.0
-    u: 0.0
-    v: 0.0
-    w: 0.3
+    theta: 0.0
+    psi: 0.3
+    u: 0.1
+    v: 0.1
+    w: 0.0
     p: 0.0
     q: 0.0
-    r: 0.0
+    r: 0.1
 # define R
 env_actions_weights_R:
     rpm: 0.03
