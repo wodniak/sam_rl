@@ -53,7 +53,7 @@ def init_env(params) -> EnvEOMGym:
     :return Instantiated environment
     """
     env = EnvEOMGym(
-        episode_length=params["test_episode_length"],
+        episode_length=params["episode_length"],
         dt=params["env_dt"],
         env_obs_states=params["env_state"],
         env_obs_state_reset=params["env_state_reset"],
@@ -78,7 +78,7 @@ def make_subproc_env(params, seed=0):
     return _init
 
 
-def setup_vec_env(params, norm_env_load_path=None) -> VecEnv:
+def setup_vec_env(params, is_eval_env=False, norm_env_load_path=None) -> VecEnv:
     """
     Prepare EOM environment for training
     :return Wrapped EOM environment
@@ -91,6 +91,10 @@ def setup_vec_env(params, norm_env_load_path=None) -> VecEnv:
         vec_env = DummyVecEnv([lambda: env])
     else:
         # Init parallel envs
+        # Create just one env if its for evaluation
+        if is_eval_env:
+            num_cpu = 1
+            params["num_cpu"] = 1
         vec_env = SubprocVecEnv([make_subproc_env(params) for i in range(num_cpu)])
         vec_env = VecMonitor(venv=vec_env)
 
@@ -117,7 +121,7 @@ def train(model_type: str, params):
     ep_length = params["episode_length"]
 
     env = setup_vec_env(params)
-    eval_env = setup_vec_env(params)
+    eval_env = setup_vec_env(params, is_eval_env=True)
 
     # The noise objects for DDPG
     n_actions = env.action_space.shape[-1]
@@ -241,23 +245,34 @@ def train(model_type: str, params):
 
 def test(model_type: str, params):
     """Testing the model"""
+    # model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"
 
-    model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d
+    # model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d
     # model_name = "19.29.39-03.22.2022/td3_1290000_steps.zip"  # pink xy 6d
     # model_name = "19.26.44-03.22.2022/ppo_900000_steps.zip"  # light blue trim 6d
     # model_name = "10.52.03-03.23.2022/td3_240000_steps.zip"  # orange 6d
 
+    # model_name = "10.51.20-03.23.2022/td3_570000_steps.zip"  #
+    # model_name = "10.52.03-03.23.2022/td3_630000_steps.zip"  #
+    # model_name = "14.22.43-03.23.2022/td3_240000_steps.zip"  #
+
+    model_name = "10.10.12-03.24.2022/td3_1200000_steps.zip"  #
+    env_name = "10.10.12-03.24.2022/td3_1200000_steps_env.pkl"
+
     # model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"  # gray 12d
     # model_name = "09.43.06-03.21.2022/td3_420000_steps.zip"  # blue 12d
     # model_name = "19.17.38-03.22.2022/td3_1230000_steps.zip"  # red 12d
-    env_name = "13.36.38-03.15.2022/td3_1050000_steps_env.pkl"
 
     env_path = params["model_dir"] + env_name
     model_path = params["model_dir"] + model_name
     # model_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/td3_999750_steps.zip"
     # env_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/td3_999750_steps_env.pkl"
 
-    env = setup_vec_env(params, norm_env_load_path=env_path)
+    # change normal parameters for test parameters
+    params["episode_length"] = params["test_episode_length"]
+    params["env_dt"] = params["test_env_dt"]
+    # env = setup_vec_env(params, is_eval_env=True, norm_env_load_path=env_path)
+    env = setup_vec_env(params, is_eval_env=True)
     env.reset()
 
     assert os.path.exists(model_path), f"Model {model_path} does not exist."
@@ -276,33 +291,9 @@ def test(model_type: str, params):
     action_dim = env.get_attr("action_space", 0)[0].shape[-1]
     state_dim = env.get_attr("observation_space", 0)[0].shape[-1]
 
-    # define setpoints
-    if state_dim == 12:
-        setpoints = np.array(
-            [
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                # [5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                # [0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                # [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            ]
-        )
-    # (x, z, theta, u, w, q)
-    if state_dim == 6:
-        setpoints = np.array(
-            [
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 5.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 5.0, 0.5, 0.0, 0.0, 0.0],
-                [0.0, -3.0, 0.5, 0.0, 0.0, 0.0],
-                [0.0, -3.0, -0.5, 0.0, 0.0, 0.0],
-                [0.0, 10.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, -10.0, 0.0, 0.0, 0.0, 0.0],
-            ]
-        )
+    # load setpoints
+    setpoints = params["test_setpoints"]
+    setpoints = np.array(setpoints)
 
     num_setpoints = setpoints.shape[0]
     for episode in range(num_setpoints):
@@ -325,7 +316,8 @@ def test(model_type: str, params):
             obs, rewards, dones, info = env.step(action)
             info = info[0]
             print(
-                "[{}] {}\n{}\n{}\n{}\n".format(
+                "{}-[{}] {}\n{}\n{}\n{}\n".format(
+                    episode,
                     ts,
                     setpoint,
                     info["state"],
@@ -441,6 +433,10 @@ if __name__ == "__main__":
 
     if args.env == "eom":
         if args.train:
+            # save the params that started the training in the model folder
+            params_save_path = model_dir + args.config + ".yaml"
+            with open(params_save_path, "w") as file:
+                documents = yaml.dump(parameter_dict, file)
             train(args.model, parameter_dict)
         else:
             test(args.model, parameter_dict)
@@ -448,10 +444,12 @@ if __name__ == "__main__":
     elif args.env == "stonefish":
         import trainer_stonefish
 
-        model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d
+        # model_name = "10.10.12-03.24.2022/td3_1200000_steps.zip"  #
+        env_name = "10.10.12-03.24.2022/td3_1200000_steps_env.pkl"
 
-        # model_name = "19.17.38-03.22.2022/td3_1230000_steps.zip"  # red 12d
-        env_name = "15.53.43-03.16.2022/td3_999750_steps_env.pkl"
+        model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"
+        # model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d - good one
+        # env_name = "15.53.43-03.16.2022/td3_999750_steps_env.pkl"
 
         env_path = model_dir + env_name
         model_path = model_dir + model_name

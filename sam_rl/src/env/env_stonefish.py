@@ -319,8 +319,8 @@ class SAMEnv(SamRosInterface):
 
     def _calculate_reward(self, state, action):
         Q = np.diag(
-            [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
-            # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0, 0.0, 0.1, 0.3, 0.0, 0.3, 0.0]
+            # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
+            [0.0, 0.1, 0.3, 0.0, 0.3, 0.0, 0.0, 0.1, 0.3, 0.0, 0.3, 0.0]
         )  # z, pitch, v, q
         R = np.diag([0.03, 0.03])  # weights on controls
         R_r = np.diag([0.3, 0.3])  # weights on rates

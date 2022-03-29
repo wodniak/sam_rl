@@ -1,24 +1,35 @@
 ###### Training hyperparameters
 episode_length: 400  # 1000: 10s of sim flight per episode
 total_episodes: 5000
-num_cpu: 1
+num_cpu: 30
 save_freq: 100  # episodes
 eval_freq: 10  # episodes
 n_eval_episodes: 5  # episodes
 
 ###### Testing hyperparameters
 test_episode_length: 3000
+test_env_dt: 0.01
+test_setpoints: [
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    # [5.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    # [0.0, 5.0, 0.0, 0.0, 0.0, 0.0],
+    # [5.0, 5.0, 0.0, 0.0, 0.0, 0.0],
+] #x,y,psi,u,v,r
 
 ###### Environment state/actions
 env_dt: 0.2
 env_reward_fn_type: "trim"
 # define normalization
-env_use_vecnormalize: False
+env_use_vecnormalize: True
 vecnormalize:
     training: True
     norm_obs: True
     norm_reward: False
-    clip_obs: 40.0
+    clip_obs: 15.0
     gamma: 0.99
 # define observed state and its max values
 env_state:
@@ -26,7 +37,7 @@ env_state:
     y: 200
     psi: 10
     u: 30
-    w: 30
+    v: 30
     r: 30
 # reset at random uniformly each episode, given max values. Other vars are 0's
 env_state_reset:
