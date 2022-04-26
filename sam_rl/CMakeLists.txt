@@ -44,19 +44,19 @@ include_directories(
 )
 
 catkin_install_python(PROGRAMS
-  src/trainer_node.py 
+  src/trainer_stonefish.py
   src/actuator_interface.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
  install(PROGRAMS
-   src/trainer_node.py 
+   src/trainer_stonefish.py
    src/actuator_interface.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
 
-catkin_install_python(PROGRAMS 
-  src/trainer_node.py 
+catkin_install_python(PROGRAMS
+  src/trainer_stonefish.py
   src/actuator_interface.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

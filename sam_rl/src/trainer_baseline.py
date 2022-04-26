@@ -22,7 +22,6 @@
 #  LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 #  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-
 import os
 import datetime
 import argparse
@@ -243,25 +242,9 @@ def train(model_type: str, params):
     )
 
 
-def test(model_type: str, params):
+def test(model_type: str, model_name, params):
     """Testing the model"""
-    # model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"
-
-    # model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d
-    # model_name = "19.29.39-03.22.2022/td3_1290000_steps.zip"  # pink xy 6d
-    # model_name = "19.26.44-03.22.2022/ppo_900000_steps.zip"  # light blue trim 6d
-    # model_name = "10.52.03-03.23.2022/td3_240000_steps.zip"  # orange 6d
-
-    # model_name = "10.51.20-03.23.2022/td3_570000_steps.zip"  #
-    # model_name = "10.52.03-03.23.2022/td3_630000_steps.zip"  #
-    # model_name = "14.22.43-03.23.2022/td3_240000_steps.zip"  #
-
-    model_name = "10.10.12-03.24.2022/td3_1200000_steps.zip"  #
-    env_name = "10.10.12-03.24.2022/td3_1200000_steps_env.pkl"
-
-    # model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"  # gray 12d
-    # model_name = "09.43.06-03.21.2022/td3_420000_steps.zip"  # blue 12d
-    # model_name = "19.17.38-03.22.2022/td3_1230000_steps.zip"  # red 12d
+    env_name = "07.33.56-04.12.2022/td3_640000_steps_env.pkl"
 
     env_path = params["model_dir"] + env_name
     model_path = params["model_dir"] + model_name
@@ -389,7 +372,7 @@ if __name__ == "__main__":
         type=str,
         nargs="?",
         default="default",
-        choices=["trim_6d", "trim_12d", "xy_6d", "xy_12d"],
+        choices=["trim_6d", "trim_12d", "xy_6d", "xy_12d", "pendulum"],
         help="Choose the model",
     )
     args = parser.parse_args()
@@ -410,8 +393,12 @@ if __name__ == "__main__":
     plot_dir = base_dir + "plots/"
     tensorboard_logs_dir = base_dir + "tensorboard_logs/"
 
+    start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
+
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
+    if not os.path.exists(model_dir + start_time):
+        os.makedirs(model_dir + start_time)
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir + "train/")
         os.makedirs(plot_dir + "test/")
@@ -419,7 +406,6 @@ if __name__ == "__main__":
         os.makedirs(tensorboard_logs_dir)
 
     # define paths
-    start_time = datetime.datetime.now().strftime("%H.%M.%S-%m.%d.%Y")
     tf_writer_path = tensorboard_logs_dir + start_time
     model_path = model_dir + start_time
     config_path = config_dir + args.config + ".yaml"
@@ -431,25 +417,24 @@ if __name__ == "__main__":
         parameter_dict["tensorboard_log"] = tf_writer_path
         parameter_dict["model_dir"] = model_dir
 
+    # PICK MODEL HERE
+    model_name = "07.29.57-04.12.2022/td3_720000_steps.zip"
+
     if args.env == "eom":
         if args.train:
             # save the params that started the training in the model folder
-            params_save_path = model_dir + args.config + ".yaml"
+            params_save_path = model_dir + start_time + "/" + args.config + ".yaml"
             with open(params_save_path, "w") as file:
                 documents = yaml.dump(parameter_dict, file)
             train(args.model, parameter_dict)
         else:
-            test(args.model, parameter_dict)
+            test(args.model, model_name, parameter_dict)
 
     elif args.env == "stonefish":
         import trainer_stonefish
 
         # model_name = "10.10.12-03.24.2022/td3_1200000_steps.zip"  #
         env_name = "10.10.12-03.24.2022/td3_1200000_steps_env.pkl"
-
-        model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"
-        # model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d - good one
-        # env_name = "15.53.43-03.16.2022/td3_999750_steps_env.pkl"
 
         env_path = model_dir + env_name
         model_path = model_dir + model_name

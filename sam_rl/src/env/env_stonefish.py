@@ -36,6 +36,8 @@ from sam_msgs.msg import ThrusterAngles, PercentStamped
 from std_msgs.msg import Float64, Header, Bool
 from . import utils
 
+from env.utils import normalize_angle_rad
+
 
 class SamRosInterface(object):
     """Use stonefish SAM simulator"""
@@ -204,9 +206,9 @@ class SAMEnv(SamRosInterface):
         self.full_state_dim = 12
         self.full_action_dim = 5  # RPM, DE, DR, LCG, VBS
         self.full_action_scale_norm = {
-            "rpm": 1000,
-            "de": 0.1,
-            "dr": 0.1,
+            "rpm": 2000,
+            "de": 0.15,
+            "dr": 0.18,
             "lcg": 100,
             "vbs": 100,
         }  # NOTE keys are the same as in `env_actions`
@@ -257,7 +259,12 @@ class SAMEnv(SamRosInterface):
         for key in self.key_to_state_map.keys():
             if key in self.env_obs_states:
                 state_pos = self.key_to_state_map[key]
-                obs.append(state_12d[state_pos])
+                value = state_12d[state_pos]
+                # normalize angle to [-pi, pi]
+                if key in ["phi", "theta", "psi"]:
+                    value = normalize_angle_rad(value)
+
+                obs.append(value)
 
         return np.array(obs)
 
@@ -273,7 +280,8 @@ class SAMEnv(SamRosInterface):
                 state_pos = self.key_to_state_map[key]
                 obs.append(state_12d[state_pos])
 
-        return np.array(obs)
+        return np.array([0.0, 0.0, 5.0, 0.0, -1.57, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # return np.array(obs)
 
     def step(self, action):
         """
@@ -322,8 +330,8 @@ class SAMEnv(SamRosInterface):
             # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
             [0.0, 0.1, 0.3, 0.0, 0.3, 0.0, 0.0, 0.1, 0.3, 0.0, 0.3, 0.0]
         )  # z, pitch, v, q
-        R = np.diag([0.03, 0.03])  # weights on controls
-        R_r = np.diag([0.3, 0.3])  # weights on rates
+        R = np.diag([0.03, 0.03, 0.03, 0.03, 0.03])  # weights on controls
+        R_r = np.diag([0.3, 0.3, 0.3, 0.3, 0.3])  # weights on rates
 
         a_diff = action - self.prev_action
 

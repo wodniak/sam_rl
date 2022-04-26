@@ -57,7 +57,7 @@ def plot_trim_with_setpoint(
 
     # states
     fig, axs = plt.subplots(2)
-    axs[1].set_ylim([-1.6, 1.6])
+    # axs[1].set_ylim([-1.6, 1.6])
     axs[0].plot(t, states[:, 0:3], label=["x", "y", "z"])  # z
     axs[0].plot(t, t_setpoint[:, 0], "--", label="x setpoint")  # x setpoint
     axs[0].plot(t, t_setpoint[:, 1], "--", label="y setpoint")  # y setpoint

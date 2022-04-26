@@ -17,7 +17,7 @@ from __future__ import division, print_function
 import numpy as np
 import math
 
-#from tf.transformations import quaternion_from_euler, euler_from_quaternion
+# from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
 
 # Function to convert quaternion to Euler
@@ -49,23 +49,38 @@ def euler_from_quaternion(pose):
 # Function to convert Euler to quaternions
 # source: https://automaticaddison.com/how-to-convert-euler-angles-to-quaternions-using-python/
 def get_quaternion_from_euler(rpy):
-    """ Convert an Euler angle to a quaternion.  
+    """Convert an Euler angle to a quaternion.
     Input
     :param roll: The roll (rotation around x-axis) angle in radians.
     :param pitch: The pitch (rotation around y-axis) angle in radians.
-    :param yaw: The yaw (rotation around z-axis) angle in radians. 
+    :param yaw: The yaw (rotation around z-axis) angle in radians.
 
     Output
         return qx, qy, qz, qw: The orientation in quaternion [x,y,z,w] format
     """
     roll, pitch, yaw = rpy
-    qx = np.sin(roll/2) * np.cos(pitch/2) * np.cos(yaw/2) - \
-        np.cos(roll/2) * np.sin(pitch/2) * np.sin(yaw/2)
-    qy = np.cos(roll/2) * np.sin(pitch/2) * np.cos(yaw/2) + \
-        np.sin(roll/2) * np.cos(pitch/2) * np.sin(yaw/2)
-    qz = np.cos(roll/2) * np.cos(pitch/2) * np.sin(yaw/2) - \
-        np.sin(roll/2) * np.sin(pitch/2) * np.cos(yaw/2)
-    qw = np.cos(roll/2) * np.cos(pitch/2) * np.cos(yaw/2) + \
-        np.sin(roll/2) * np.sin(pitch/2) * np.sin(yaw/2)
+    qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(
+        roll / 2
+    ) * np.sin(pitch / 2) * np.sin(yaw / 2)
+    qy = np.cos(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2) + np.sin(
+        roll / 2
+    ) * np.cos(pitch / 2) * np.sin(yaw / 2)
+    qz = np.cos(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2) - np.sin(
+        roll / 2
+    ) * np.sin(pitch / 2) * np.cos(yaw / 2)
+    qw = np.cos(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) + np.sin(
+        roll / 2
+    ) * np.sin(pitch / 2) * np.sin(yaw / 2)
 
     return [qx, qy, qz, qw]
+
+
+def normalize_angle_rad(angle):
+    """
+    :param angle : in rad
+    :return angle in rad [-pi, pi]
+    """
+    angle = angle % (2 * np.pi)
+    if angle > np.pi:
+        angle -= 2 * np.pi
+    return angle

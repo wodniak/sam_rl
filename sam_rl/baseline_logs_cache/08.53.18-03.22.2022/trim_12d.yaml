@@ -1,0 +1,151 @@
+batch_size: 64
+buffer_size: 1000000
+device: auto
+env_actions:
+  lcg: 4
+  vbs: 5
+env_actions_weights_R:
+  de: 0.03
+  dr: 0.03
+  lcg: 0.03
+  rpm: 0.03
+  vbs: 0.03
+env_actions_weights_R_r:
+  de: 0.3
+  dr: 0.3
+  lcg: 0.3
+  rpm: 0.3
+  vbs: 0.3
+env_dt: 0.01
+env_reward_fn_type: trim
+env_state:
+  p: 30
+  phi: 10
+  psi: 10
+  q: 30
+  r: 30
+  theta: 10
+  u: 30
+  v: 30
+  w: 30
+  x: 200
+  y: 200
+  z: 200
+env_state_reset:
+  theta: 1.57
+  z: 10
+env_state_weights_Q:
+  p: 0.0
+  phi: 0.0
+  psi: 0.0
+  q: 0.0
+  r: 0.0
+  theta: 0.3
+  u: 0.0
+  v: 0.0
+  w: 0.3
+  x: 0.0
+  y: 0.0
+  z: 0.1
+env_use_vecnormalize: false
+episode_length: 2000
+eval_freq: 10
+gamma: 0.99
+gradient_steps: -1
+learning_rate: 0.001
+learning_starts: 128
+model_dir: /home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs/model/
+n_eval_episodes: 5
+num_cpu: 30
+off_policy_kwargs:
+  net_arch:
+    pi:
+    - 64
+    - 64
+    qf:
+    - 64
+    - 64
+on_policy_kwargs:
+  net_arch:
+  - pi:
+    - 64
+    - 64
+  - qf:
+    - 64
+    - 64
+save_freq: 100
+sigma: 0.1
+tau: 0.005
+tensorboard_log: /home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs/tensorboard_logs/12.24.01-04.05.2022
+test_env_dt: 0.01
+test_episode_length: 3000
+test_setpoints:
+- - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+- - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+- - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+- - 0.0
+  - 0.0
+  - 5.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+- - 0.0
+  - 0.0
+  - -5.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+total_episodes: 5000
+train_freq: 5
+vecnormalize:
+  clip_obs: 40.0
+  gamma: 0.99
+  norm_obs: true
+  norm_reward: false
+  training: true
+verbose: 0

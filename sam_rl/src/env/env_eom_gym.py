@@ -31,6 +31,8 @@ import random
 from scipy.integrate import solve_ivp
 from typing import Optional
 
+from env.utils import normalize_angle_rad
+
 
 def T_b2ned(phi, theta, psi):
     """:return translation matrix in NED frame"""
@@ -275,6 +277,7 @@ class EnvEOMGym(gym.Env):
         self.env_obs_states = env_obs_states  # defined in params
         self.env_obs_state_reset = env_obs_state_reset
         self.env_actions = env_actions
+        self.env_reward_fn_type = env_reward_fn_type
         self.key_to_state_map = {
             "x": 0,
             "y": 1,
@@ -296,6 +299,10 @@ class EnvEOMGym(gym.Env):
             )
         elif env_reward_fn_type == "xy":
             self.reward_fn = RewardFnXY(
+                env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
+            )
+        elif env_reward_fn_type == "pendulum":
+            self.reward_fn = RewardFnInvertedPendulum(
                 env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
             )
         else:
@@ -353,7 +360,13 @@ class EnvEOMGym(gym.Env):
         for key in self.key_to_state_map.keys():
             if key in self.env_obs_states:
                 state_pos = self.key_to_state_map[key]
-                obs.append(state_12d[state_pos])
+                value = state_12d[state_pos]
+
+                # normalize angle to [-pi, pi]
+                if key in ["phi", "theta", "psi"]:
+                    value = normalize_angle_rad(value)
+
+                obs.append(value)
         return np.array(obs)
 
     def _reset_uniform(self):
@@ -362,13 +375,20 @@ class EnvEOMGym(gym.Env):
         for key in self.env_obs_state_reset.keys():
             value = self.env_obs_state_reset[key]
             pos = self.key_to_state_map[key]
-            state[pos] = np.random.uniform(-value, value, 1)
+            state[pos] = np.random.uniform(value["min"], value["max"], 1)
         return state
+
+    def _is_done(self, state):
+        # return self.reward_fn.is_done(state) or self.current_step >= self.ep_length
+        return self.current_step >= self.ep_length
 
     def step(self, action):
         action_6d = self._make_action_6d(action)
         # action_6d = np.array([action[0], action[0], 0.0, action[2], 0.0, 0.0])
         t, full_state = self.dynamics.step(action_6d)  # 12d
+        full_state[3] = normalize_angle_rad(full_state[3])
+        full_state[4] = normalize_angle_rad(full_state[4])
+        full_state[5] = normalize_angle_rad(full_state[5])
         self.full_state = full_state  # for plotting in tensorboard
 
         observed_state = self._get_obs()
@@ -378,7 +398,7 @@ class EnvEOMGym(gym.Env):
 
         self.prev_action = action
         self.current_step += 1
-        done = self.current_step >= self.ep_length
+        done = self._is_done(observed_state)
 
         info_state = {
             "xyz": full_state[0:3].round(2).tolist(),
@@ -395,7 +415,7 @@ class EnvEOMGym(gym.Env):
             "vbs": action_6d[5],
         }
         info = {"rewards": reward_info, "state": info_state, "actions": info_actions}
-
+        # print(info)
         return observed_state, self.reward, done, info
 
     def set_init_state(self, init_state):
@@ -459,10 +479,10 @@ class RewardFnTrim(RewardFnBase):
     def __init__(self, env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
         super().__init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r)
         # sanity checks
-        # assert "z" in env_obs_states, "Missing env states for TRIM cost function"
-        # assert "theta" in env_obs_states, "Missing env states for TRIM cost function"
-        # assert "w" in env_obs_states, "Missing env states for TRIM cost function"
-        # assert "q" in env_obs_states, "Missing env states for TRIM cost function"
+        assert "z" in env_obs_states, "Missing env states for TRIM cost function"
+        assert "theta" in env_obs_states, "Missing env states for TRIM cost function"
+        assert "w" in env_obs_states, "Missing env states for TRIM cost function"
+        assert "q" in env_obs_states, "Missing env states for TRIM cost function"
 
     def calculate_reward(self, state, action):
         """Reward function for Trim"""
@@ -539,6 +559,79 @@ class RewardFnXY(RewardFnBase):
         }
 
         return e_total, e_info
+
+
+class RewardFnInvertedPendulum(RewardFnBase):
+    def __init__(self, env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
+        super().__init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r)
+        # sanity checks
+        name = "Inverted Pendulum"
+        assert "theta" in env_obs_states, f"Missing env states for {name} cost function"
+
+        self.target_theta = -1.5708
+        # x, y, z, phi, theta, psi, u, v, w, p, q, r
+        self.target_state = np.array(
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                self.target_theta,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ]
+        )
+        # rpm, de, dr, lcg, vbs
+        self.target_actions = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+
+    def calculate_reward(self, state, action):
+        """Reward function for Inverted pendulum"""
+        assert len(state) == self.state_dim
+        assert len(action) == self.action_dim
+
+        a_diff = action - self.prev_action
+
+        pos = state[0:3]
+        theta = state[4]
+        theta_dt = state[7]
+        theta_acc = state[10]
+
+        e_s = np.minimum(np.linalg.norm(pos**2 * self.Q[0:3]), 10.0)
+        e_theta = (
+            (theta - self.target_theta) ** 2
+            + 0.1 * theta_dt**2
+            + 0.001 * theta_acc**2
+        )
+        e_a = np.linalg.norm(
+            (action - self.target_actions) ** 2 * self.R
+        )  # error on actions
+        e_r = np.linalg.norm(a_diff**2 * self.R_r)  # error on action rates
+
+        e = e_s + e_theta + e_a + e_r
+        error = -e
+
+        e_info = {
+            "e_total": round(error, 3),
+            "e_state": round(-e_s, 3),
+            "e_theta": round(-e_theta, 3),
+            "e_action": round(-e_a, 3),
+            "e_action_rate": round(-e_r, 3),
+        }
+
+        return error, e_info
+
+    def is_done(self, state):
+        """
+        :return True if SAM loses balance
+        """
+        theta = state[4]
+        eps = 0.3
+        return theta < (self.target_theta - eps) or theta > (self.target_theta + eps)
 
 
 if __name__ == "__main__":
