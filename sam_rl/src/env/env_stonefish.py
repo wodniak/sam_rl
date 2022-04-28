@@ -332,7 +332,9 @@ class SAMEnv(SamRosInterface):
         )  # z, pitch, v, q
         R = np.diag([0.03, 0.03, 0.03, 0.03, 0.03])  # weights on controls
         R_r = np.diag([0.3, 0.3, 0.3, 0.3, 0.3])  # weights on rates
-
+        # R = np.diag([0.03, 0.03])  # weights on controls
+        # R_r = np.diag([0.3, 0.3])  # weights on rates
+        #
         a_diff = action - self.prev_action
 
         e_s = np.linalg.norm(state * Q * state)  # error on state, setpoint is all 0's

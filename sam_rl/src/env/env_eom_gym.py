@@ -305,6 +305,10 @@ class EnvEOMGym(gym.Env):
             self.reward_fn = RewardFnInvertedPendulum(
                 env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
             )
+        elif env_reward_fn_type == "tight_turn":
+            self.reward_fn = RewardFnTightTurn(
+                env_obs_states, env_actions, weights_Q, weights_R, weights_R_r
+            )
         else:
             self.reward_fn = None
 
@@ -634,17 +638,112 @@ class RewardFnInvertedPendulum(RewardFnBase):
         return theta < (self.target_theta - eps) or theta > (self.target_theta + eps)
 
 
+class RewardFnTightTurn(RewardFnBase):
+    def __init__(self, env_obs_states, env_actions, weights_Q, weights_R, weights_R_r):
+        super().__init__(env_obs_states, env_actions, weights_Q, weights_R, weights_R_r)
+        # sanity checks
+        name = "Tight Turn"
+        assert "x" in env_obs_states, f"Missing env states for {name} cost function"
+        assert "y" in env_obs_states, f"Missing env states for {name} cost function"
+        assert "psi" in env_obs_states, f"Missing env states for {name} cost function"
+        assert "u" in env_obs_states, f"Missing env states for {name} cost function"
+        assert "v" in env_obs_states, f"Missing env states for {name} cost function"
+        assert "r" in env_obs_states, f"Missing env states for {name} cost function"
+
+        self.psi_dt_target = 0.5  # manual max
+        # rpm, de, dr, lcg, vbs
+
+    def calculate_reward(self, state, action):
+        """Reward function for tight turn"""
+        assert len(state) == self.state_dim
+        assert len(action) == self.action_dim
+
+        # Cost on position
+        if self.state_dim == 6:
+            pos = state[0:2]
+            e_s = 0.5 * np.minimum(
+                np.linalg.norm(pos * self.Q[0:2]), 3.14
+            )  # max cost as for heading
+        else:
+            pos = state[0:3]
+            e_s = 0.5 * np.minimum(
+                np.linalg.norm(pos * self.Q[0:3]), 3.14
+            )  # max cost as for heading
+
+        # Cost on velocity
+        # min = 0, max = 5 (when not moving)
+        psi_dt = state[5] if self.state_dim == 6 else state[11]
+        psi_dt = np.abs(psi_dt)
+        e_psi_dt = np.linalg.norm((psi_dt - self.psi_dt_target)) * 10
+
+        # Cost on actions
+        a_diff = action - self.prev_action
+        e_a = np.linalg.norm(action**2 * self.R)  # error on actions
+        e_r = np.linalg.norm(a_diff**2 * self.R_r)  # error on action rates
+
+        # Cost on heading
+        # Reward on keeping the heading toward the origin, min = 0, max = 3.14
+        # NOTE: Vectors are in SAM body frame, i.e, when SAM heads toward origin angle = 0 rad.
+        psi = state[2] if self.state_dim == 6 else state[5]
+        sam_to_origin_v = state[0:2]  # x,y
+        sam_to_origin_v_unit = sam_to_origin_v / np.linalg.norm(sam_to_origin_v)
+        sam_heading_v = np.array([-np.cos(psi), -np.sin(psi)])
+        sam_heading_v_unit = sam_heading_v / np.linalg.norm(sam_heading_v)
+        e_heading = np.arccos(
+            np.clip(np.dot(sam_to_origin_v_unit, sam_heading_v_unit), -1.0, 1.0)
+        )  # https://stackoverflow.com/a/13849249
+
+        # total cost
+        error = -(e_s + e_psi_dt + e_a + e_r + e_heading)
+
+        e_info = {
+            "e_total": round(error, 3),
+            "e_state": round(-e_s, 3),
+            "e_psi_dt": round(-e_psi_dt, 3),
+            "e_action": round(-e_a, 3),
+            "e_action_rate": round(-e_r, 3),
+            "e_heading": round(-e_heading, 3),
+        }
+
+        return error, e_info
+
+    def is_done(self, state):
+        """
+        :return True if SAM loses balance
+        """
+        theta = state[4]
+        eps = 0.3
+        return theta < (self.target_theta - eps) or theta > (self.target_theta + eps)
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+    import yaml
 
-    ep_length = 7000
-    env = EnvEOMGym(episode_length=ep_length, num_envs=1)
-    action = np.array([-1, 0.0, 1.0, 0.0, 0.0])
+    config_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/src/config/tight_turn_6d.yaml"
+    with open(config_path) as file:
+        print(f"Loading config file : {config_path}")
+        params = yaml.load(file, Loader=yaml.FullLoader)
 
-    states = np.zeros([ep_length, 12])
-    for ts in range(ep_length):
+    env = EnvEOMGym(
+        episode_length=params["episode_length"],
+        dt=params["env_dt"],
+        env_obs_states=params["env_state"],
+        env_obs_state_reset=params["env_state_reset"],
+        env_actions=params["env_actions"],
+        env_reward_fn_type=params["env_reward_fn_type"],
+        weights_Q=params["env_state_weights_Q"],
+        weights_R=params["env_actions_weights_R"],
+        weights_R_r=params["env_actions_weights_R_r"],
+        num_envs=params["num_cpu"],
+    )
+    action = np.array([-1, 1.0])
+
+    test_length = 1
+    states = np.zeros([test_length, 12])
+    for ts in range(test_length):
         state, reward, done, info = env.step(action)
-        states[ts] = state
+        states[ts] = env.full_state
 
         print(
             "[{}] {}\n{}\n{}\n".format(
@@ -658,6 +757,31 @@ if __name__ == "__main__":
     ax.plot(states[:, 0], states[:, 1], "k-", label="sim")
     ax.plot(states[:1, 0], states[:1, 1], "go", label="start")
     ax.plot(states[-1, 0], states[-1, 1], "ro", label="end")
+    ax.plot(0.0, 0.0, "ko", label="origin")
+
+    # arrows
+    r = 0.2
+    x_0 = states[-1, 0]
+    y_0 = states[-1, 1]
+    psi_0 = states[-1, 5]  # psi
+    plt.arrow(
+        x_0,
+        y_0,
+        r * np.cos(psi_0),
+        r * np.sin(psi_0),
+        color="blue",
+        head_length=0.1,
+        head_width=0.1,
+    )
+    plt.arrow(
+        x_0,
+        y_0,
+        -x_0,
+        -y_0,
+        color="blue",
+        head_length=0.1,
+        head_width=0.1,
+    )  # In SAM frame
 
     # format
     ax.set_xlabel("$x~[m]$")

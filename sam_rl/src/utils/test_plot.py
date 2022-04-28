@@ -100,7 +100,40 @@ def plot_traj_2d(title: str, epoch, plot_dir, t, states, setpoint):
     ax.plot(states[:, 0], states[:, 1], "k-", label="sim")
     ax.plot(states[:1, 0], states[:1, 1], "go", label="start")
     ax.plot(states[-1, 0], states[-1, 1], "ro", label="end")
-    ax.plot(setpoint[0], setpoint[1], "ko", label="setpoint")
+    # ax.plot(setpoint[0], setpoint[1], "ko", label="setpoint")
+
+    step = 500
+    print(f"states.shape[-2] : {states.shape[-2]}")
+    for i in range(states.shape[-2] // step):
+        print(i)
+        idx = i * step
+        r = 1
+        x_0 = states[idx, 0]
+        y_0 = states[idx, 1]
+        psi_0 = states[idx, 5]  # psi
+        plt.arrow(
+            x_0,
+            y_0,
+            r * np.cos(psi_0),
+            r * np.sin(psi_0),
+            color="blue",
+            head_length=1,
+            head_width=1,
+        )
+    # arrow at the stop
+    r = 1
+    x_1 = states[-1, 0]
+    y_1 = states[-1, 1]
+    psi_1 = states[-1, 5]  # psi
+    plt.arrow(
+        x_1,
+        y_1,
+        r * np.cos(psi_1),
+        r * np.sin(psi_1),
+        color="blue",
+        head_length=1,
+        head_width=1,
+    )
 
     # format
     ax.set_xlabel("$x~[m]$")

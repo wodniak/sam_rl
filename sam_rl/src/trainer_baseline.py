@@ -110,6 +110,7 @@ def setup_vec_env(params, is_eval_env=False, norm_env_load_path=None) -> VecEnv:
                 gamma=vecnormalize_params["gamma"],
             )
         else:
+            print(f"Loading Vec Env: {norm_env_load_path}")
             vec_env = VecNormalize.load(load_path=norm_env_load_path, venv=vec_env)
     return vec_env
 
@@ -244,7 +245,8 @@ def train(model_type: str, params):
 
 def test(model_type: str, model_name, params):
     """Testing the model"""
-    env_name = "07.33.56-04.12.2022/td3_640000_steps_env.pkl"
+    use_env = params["env_use_vecnormalize"]
+    env_name = model_name[:-4] + "_env.pkl"
 
     env_path = params["model_dir"] + env_name
     model_path = params["model_dir"] + model_name
@@ -254,8 +256,11 @@ def test(model_type: str, model_name, params):
     # change normal parameters for test parameters
     params["episode_length"] = params["test_episode_length"]
     params["env_dt"] = params["test_env_dt"]
-    # env = setup_vec_env(params, is_eval_env=True, norm_env_load_path=env_path)
-    env = setup_vec_env(params, is_eval_env=True)
+
+    if use_env:
+        env = setup_vec_env(params, is_eval_env=True, norm_env_load_path=env_path)
+    else:
+        env = setup_vec_env(params, is_eval_env=True)
     env.reset()
 
     assert os.path.exists(model_path), f"Model {model_path} does not exist."
@@ -372,7 +377,15 @@ if __name__ == "__main__":
         type=str,
         nargs="?",
         default="default",
-        choices=["trim_6d", "trim_12d", "xy_6d", "xy_12d", "pendulum"],
+        choices=[
+            "trim_6d",
+            "trim_12d",
+            "xy_6d",
+            "xy_12d",
+            "pendulum",
+            "tight_turn_6d",
+            "tight_turn_12d",
+        ],
         help="Choose the model",
     )
     args = parser.parse_args()
@@ -397,31 +410,47 @@ if __name__ == "__main__":
 
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
-    if not os.path.exists(model_dir + start_time):
-        os.makedirs(model_dir + start_time)
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir + "train/")
         os.makedirs(plot_dir + "test/")
     if not os.path.exists(tensorboard_logs_dir):
         os.makedirs(tensorboard_logs_dir)
 
+    # PICK MODEL HERE
+    # model_name = "15.22.26-04.26.2022/td3_1000000_steps.zip"  # pendulum
+    # model_name = "15.22.52-04.26.2022/ddpg_800000_steps.zip" #pendulum
+
+    # model_name = "15.19.28-04.26.2022/ddpg_1000000_steps.zip"  # trim
+    # model_name = "15.19.04-04.26.2022/ddpg_1000000_steps.zip"  # trim
+    # model_name = "15.14.05-04.26.2022/td3_1000000_steps.zip"  # trim
+    # model_name = "15.18.24-04.26.2022/td3_1000000_steps.zip"  # trim
+
+    model_name = "11.59.43-04.27.2022/td3_1160000_steps.zip"  # tight looping
+
     # define paths
     tf_writer_path = tensorboard_logs_dir + start_time
     model_path = model_dir + start_time
-    config_path = config_dir + args.config + ".yaml"
+
+    # config_path = config_dir + args.config + ".yaml"
+    if args.train:
+        config_path = config_dir + args.config + ".yaml"
+    else:
+        date = model_name.split("/")[0]
+        config = args.config + ".yaml"
+        config_path = model_dir + date + "/" + config
 
     with open(config_path) as params:
         # The FullLoader parameter handles the conversion from YAML
         # scalar values to Python the dictionary format
+        print(f"Loading config file : {config_path}")
         parameter_dict = yaml.load(params, Loader=yaml.FullLoader)
         parameter_dict["tensorboard_log"] = tf_writer_path
         parameter_dict["model_dir"] = model_dir
 
-    # PICK MODEL HERE
-    model_name = "07.29.57-04.12.2022/td3_720000_steps.zip"
-
     if args.env == "eom":
         if args.train:
+            if not os.path.exists(model_dir + start_time):
+                os.makedirs(model_dir + start_time)
             # save the params that started the training in the model folder
             params_save_path = model_dir + start_time + "/" + args.config + ".yaml"
             with open(params_save_path, "w") as file:
