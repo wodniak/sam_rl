@@ -33,6 +33,8 @@ from typing import Optional
 
 from env.utils import normalize_angle_rad
 
+# from utils import normalize_angle_rad
+
 
 def T_b2ned(phi, theta, psi):
     """:return translation matrix in NED frame"""
@@ -538,7 +540,7 @@ class RewardFnXY(RewardFnBase):
             e_action_rate = 0.1 * np.linalg.norm(a_diff)
         # assumed states: x,y,psi,u,v,r
         elif self.state_dim == 6:
-            e_position = np.log(np.linalg.norm(state[0:2]))
+            e_position = np.linalg.norm(state[0:2])
             e_orientation = 0.2 * np.linalg.norm(state[2:3])
             e_lin_vel = 0.1 * np.linalg.norm(state[3:5])
             e_ang_vel = 0.1 * np.linalg.norm(state[5:6])
@@ -551,6 +553,7 @@ class RewardFnXY(RewardFnBase):
         e_total = -dt * np.sum(
             [e_position, e_orientation, e_lin_vel, e_ang_vel, e_action, e_action_rate]
         )
+        # e_total = -dt * e_position
 
         e_info = {
             "e_total": round(e_total, 3),
@@ -591,7 +594,8 @@ class RewardFnInvertedPendulum(RewardFnBase):
             ]
         )
         # rpm, de, dr, lcg, vbs
-        self.target_actions = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+        # self.target_actions = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+        self.target_actions = np.array([0.0, 0.0, 0.0])
 
     def calculate_reward(self, state, action):
         """Reward function for Inverted pendulum"""
@@ -659,11 +663,10 @@ class RewardFnTightTurn(RewardFnBase):
         assert len(action) == self.action_dim
 
         # Cost on position
+        r = 3
         if self.state_dim == 6:
             pos = state[0:2]
-            e_s = 0.5 * np.minimum(
-                np.linalg.norm(pos * self.Q[0:2]), 3.14
-            )  # max cost as for heading
+            e_s = np.minimum(np.abs(np.linalg.norm(pos) - r), 7)  # stay on the circle
         else:
             pos = state[0:3]
             e_s = 0.5 * np.minimum(
@@ -674,12 +677,12 @@ class RewardFnTightTurn(RewardFnBase):
         # min = 0, max = 5 (when not moving)
         psi_dt = state[5] if self.state_dim == 6 else state[11]
         psi_dt = np.abs(psi_dt)
-        e_psi_dt = np.linalg.norm((psi_dt - self.psi_dt_target)) * 10
+        e_psi_dt = np.linalg.norm((psi_dt - self.psi_dt_target)) * 20
 
-        # Cost on actions
-        a_diff = action - self.prev_action
-        e_a = np.linalg.norm(action**2 * self.R)  # error on actions
-        e_r = np.linalg.norm(a_diff**2 * self.R_r)  # error on action rates
+        # # Cost on actions
+        # a_diff = action - self.prev_action
+        # e_a = np.linalg.norm(action**2 * self.R)  # error on actions
+        # e_r = np.linalg.norm(a_diff**2 * self.R_r)  # error on action rates
 
         # Cost on heading
         # Reward on keeping the heading toward the origin, min = 0, max = 3.14
@@ -692,25 +695,25 @@ class RewardFnTightTurn(RewardFnBase):
         e_heading = np.arccos(
             np.clip(np.dot(sam_to_origin_v_unit, sam_heading_v_unit), -1.0, 1.0)
         )  # https://stackoverflow.com/a/13849249
+        # print(f"np.arctan2: {np.arctan2(state[1],state[0])}")
 
         # total cost
-        error = -(e_s + e_psi_dt + e_a + e_r + e_heading)
+        # error = -(e_s + e_psi_dt + e_a + e_r + e_heading)
+        error = -(e_s + e_psi_dt + e_heading)
 
         e_info = {
             "e_total": round(error, 3),
             "e_state": round(-e_s, 3),
             "e_psi_dt": round(-e_psi_dt, 3),
-            "e_action": round(-e_a, 3),
-            "e_action_rate": round(-e_r, 3),
+            # "e_action": round(-e_a, 3),
+            # "e_action_rate": round(-e_r, 3),
             "e_heading": round(-e_heading, 3),
         }
 
         return error, e_info
 
     def is_done(self, state):
-        """
-        :return True if SAM loses balance
-        """
+        """ """
         theta = state[4]
         eps = 0.3
         return theta < (self.target_theta - eps) or theta > (self.target_theta + eps)

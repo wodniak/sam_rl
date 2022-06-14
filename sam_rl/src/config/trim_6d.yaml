@@ -40,8 +40,12 @@ env_state:
     q: 30
 # reset at random uniformly each episode, given max values. Other vars are 0's
 env_state_reset:
-    z: 10
-    theta: 1.57
+  theta:
+    max: 1.57
+    min: -1.57
+  z:
+    max: 5
+    min: -5
 # define available actions and its position in action_6d vector
 env_actions:
     # rpm: 1

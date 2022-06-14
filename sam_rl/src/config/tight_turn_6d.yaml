@@ -10,12 +10,7 @@ n_eval_episodes: 5  # episodes
 test_episode_length: 3000
 test_env_dt: 0.01
 test_setpoints: [
-    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.0, 0.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
 ]
 
 ###### Environment state/actions
@@ -33,35 +28,26 @@ vecnormalize:
 env_state:
     x: 200
     y: 200
-    # z: 200
-    # phi: 10
-    # theta: 10
     psi: 10
     u: 30
     v: 30
-    # w: 30
-    # p: 30
-    # q: 30
     r: 30
 # reset at random uniformly each episode, given max values. Other vars are 0's
 env_state_reset:
     psi:
-        min: -3
-        max: 3
+        min: -2.3
+        max: -2.3
     x:
-        min: -2.
+        min: 2.
         max: 2.
     y:
-        min: -2.
+        min: 2.
         max: 2.
 
 # define available actions and its position in action_6d vector
 env_actions:
     rpm: 1
-    # de: 2
     dr: 3
-    # lcg: 4
-    # vbs: 5
 
 ###### Q R R_r weight matrices for reward function
 # define Q

@@ -26,10 +26,27 @@ import os
 
 import numpy as np
 import matplotlib.pyplot as plt
+import csv
 
 """
 Used for plotting test results
 """
+
+
+def save_in_csv(title: str, epoch, plot_dir: str, t, states, actions, t_setpoint):
+    """to cvs"""
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+
+    header = ["z", "theta", "vbs", "lcg"]
+    file_name = plot_dir + f"{epoch}_states.csv"
+    with open(file_name, "w", encoding="UTF8") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+
+        for i in range(states.shape[0]):
+            data = [states[i, 2], states[i, 4], actions[i, 3], actions[i, 4]]
+            writer.writerow(data)
 
 
 def plot_trim_with_setpoint(
@@ -42,8 +59,11 @@ def plot_trim_with_setpoint(
     # actions
     fig, axs = plt.subplots(3)
     axs[0].set_ylim([-1.1, 1.1])
+    # fig[0].xlabel("timestep")
     axs[1].set_ylim([-1.1, 1.1])
+    # fig[1].xlabel("timestep")
     axs[2].set_ylim([-1.1, 1.1])
+    # fig[2].xlabel("timestep")
     axs[0].plot(t, actions[:, 0], label="rpm")
     axs[1].plot(t, actions[:, 1:3], label=["de", "dr"])
     axs[2].plot(t, actions[:, 3:5], label=["lcg", "vbs"])
@@ -59,11 +79,15 @@ def plot_trim_with_setpoint(
     fig, axs = plt.subplots(2)
     # axs[1].set_ylim([-1.6, 1.6])
     axs[0].plot(t, states[:, 0:3], label=["x", "y", "z"])  # z
+    # axs[0].xlabel("timestep")
+    # axs[0].ylabel("m")
     axs[0].plot(t, t_setpoint[:, 0], "--", label="x setpoint")  # x setpoint
     axs[0].plot(t, t_setpoint[:, 1], "--", label="y setpoint")  # y setpoint
     axs[0].plot(t, t_setpoint[:, 2], "--", label="z setpoint")  # z setpoint
     axs[1].plot(t, states[:, 3:6], label=["phi", "theta", "psi"])  # theta
     axs[1].plot(t, t_setpoint[:, 4], "k--", label="theta setpoint")  # theta setpoint
+    # axs[1].xlabel("timestep")
+    # axs[1].ylabel("rad")
     for ax in axs:
         ax.legend()
         ax.grid()
@@ -96,13 +120,13 @@ def plot_traj_2d(title: str, epoch, plot_dir, t, states, setpoint):
     """2D XY trajectory plot"""
     fig = plt.figure()
     ax = fig.add_subplot(111)
-
+    ax.axis("equal")
     ax.plot(states[:, 0], states[:, 1], "k-", label="sim")
     ax.plot(states[:1, 0], states[:1, 1], "go", label="start")
     ax.plot(states[-1, 0], states[-1, 1], "ro", label="end")
     # ax.plot(setpoint[0], setpoint[1], "ko", label="setpoint")
 
-    step = 500
+    step = 1000
     print(f"states.shape[-2] : {states.shape[-2]}")
     for i in range(states.shape[-2] // step):
         print(i)

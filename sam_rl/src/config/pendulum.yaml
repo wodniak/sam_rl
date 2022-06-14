@@ -1,7 +1,7 @@
 ###### Training hyperparameters
 episode_length: 400  # 1000: 10s of sim flight per episode
 total_episodes: 5000
-num_cpu: 1
+num_cpu: 30
 save_freq: 100  # episodes
 eval_freq: 10  # episodes
 n_eval_episodes: 5  # episodes
@@ -49,11 +49,11 @@ env_state_reset:
         max: 3.
 # define available actions and its position in action_6d vector
 env_actions:
-    rpm: 1
-    de: 2
-    dr: 3
-    lcg: 4
-    vbs: 5
+  rpm: 1
+  de: 2
+  dr: 3
+  lcg: 4
+  vbs: 5
 
 ###### Q R R_r weight matrices for reward function
 # define Q

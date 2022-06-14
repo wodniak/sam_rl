@@ -389,7 +389,7 @@ def test(model_type: str, model_path: str, env: SAMEnv, max_timesteps: int):
 
     print("Loading inverted pendulum")
     periscope = InvertedPendulum(rospy.get_name())
-    use_pendulum = True
+    use_pendulum = False
 
     episode = 0
     obs = env.reset()
@@ -421,11 +421,11 @@ def test(model_type: str, model_path: str, env: SAMEnv, max_timesteps: int):
             ep_actions[ts] = [*info["actions"].values()]  # save
             ep_states[ts] = list(itertools.chain(*info["state"].values()))  # save
 
-            print(
-                "[{}] {}\n{}\n{}\n{}\n{}\n".format(
-                    ts, setpoint, info["state"], info["actions"], info["rewards"], obs
-                )
-            )
+            # print(
+            #     "[{}] {}\n{}\n{}\n{}\n{}\n".format(
+            #         ts, setpoint, info["state"], info["actions"], info["rewards"], obs
+            #     )
+            # )
 
         # after episode
         # print(f'[{episode}]\n \tsetpoint = {setpoint}\n \

@@ -21,7 +21,7 @@ test_setpoints: [
 env_dt: 0.2
 env_reward_fn_type: "trim"
 # define normalization
-env_use_vecnormalize: False
+env_use_vecnormalize: True
 vecnormalize:
     training: True
     norm_obs: True

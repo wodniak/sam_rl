@@ -280,7 +280,8 @@ class SAMEnv(SamRosInterface):
                 state_pos = self.key_to_state_map[key]
                 obs.append(state_12d[state_pos])
 
-        return np.array([0.0, 0.0, 5.0, 0.0, -1.57, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        return np.array([0.0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         # return np.array(obs)
 
     def step(self, action):
@@ -330,10 +331,10 @@ class SAMEnv(SamRosInterface):
             # [0.0, 0.1, 0.3, 0.0, 0.3, 0.0],
             [0.0, 0.1, 0.3, 0.0, 0.3, 0.0, 0.0, 0.1, 0.3, 0.0, 0.3, 0.0]
         )  # z, pitch, v, q
-        R = np.diag([0.03, 0.03, 0.03, 0.03, 0.03])  # weights on controls
-        R_r = np.diag([0.3, 0.3, 0.3, 0.3, 0.3])  # weights on rates
-        # R = np.diag([0.03, 0.03])  # weights on controls
-        # R_r = np.diag([0.3, 0.3])  # weights on rates
+        # R = np.diag([0.03, 0.03, 0.03, 0.03, 0.03])  # weights on controls
+        # R_r = np.diag([0.3, 0.3, 0.3, 0.3, 0.3])  # weights on rates
+        R = np.diag([0.03, 0.03])  # weights on controls
+        R_r = np.diag([0.3, 0.3])  # weights on rates
         #
         a_diff = action - self.prev_action
 

@@ -250,7 +250,12 @@ def test(model_type: str, model_name, params):
 
     env_path = params["model_dir"] + env_name
     model_path = params["model_dir"] + model_name
-    # model_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/td3_999750_steps.zip"
+
+    use_env = False
+    model_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/08.52.04-03.22.2022/td3_750000_steps.zip"
+    # model_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/08.53.18-03.22.2022/td3_840000_steps.zip"
+    # model_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/07.29.57-04.12.2022/td3_720000_steps.zip"
+    # model_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/1_test_trim/td3_trim_6d_test.zip"
     # env_path = "/home/gwozniak/catkin_ws/src/smarc_rl_controllers/sam_rl/baseline_logs_cache/2_test_xy_waypoint/td3_999750_steps_env.pkl"
 
     # change normal parameters for test parameters
@@ -300,7 +305,6 @@ def test(model_type: str, model_name, params):
         for ts in range(ep_length):
             obs -= setpoint  # will follow setpoint
             action, _states = model.predict(obs)  # deterministic for DDPG
-
             obs, rewards, dones, info = env.step(action)
             info = info[0]
             print(
@@ -331,6 +335,9 @@ def test(model_type: str, model_name, params):
         t_setpoint = np.tile(setpoint, (ep_length, 1))
         title = f"{model_type}:{model_name}"
 
+        # utils.test_plot.save_in_csv(
+        #     title, episode, plot_test_dir, ep_t, ep_states, ep_actions, t_setpoint
+        # )
         utils.test_plot.plot_trim_with_setpoint(
             title, episode, plot_test_dir, ep_t, ep_states, ep_actions, t_setpoint
         )
@@ -417,15 +424,22 @@ if __name__ == "__main__":
         os.makedirs(tensorboard_logs_dir)
 
     # PICK MODEL HERE
-    # model_name = "15.22.26-04.26.2022/td3_1000000_steps.zip"  # pendulum
-    # model_name = "15.22.52-04.26.2022/ddpg_800000_steps.zip" #pendulum
+    # model_name = "08.31.38-05.09.2022/td3_680000_steps.zip"  # trim
+    # model_name = "08.32.14-05.09.2022/td3_600000_steps.zip"  # trim
+    # model_name = "08.39.39-05.09.2022/td3_680000_steps.zip"  # trim
+    # model_name = "08.42.20-05.09.2022/ppo_840000_steps.zip"  # trim ppo
+    # model_name = "08.42.58-05.09.2022/ppo_300000_steps.zip"  # trim ppo
+    # model_name = "13.20.25-05.11.2022/td3_1640000_steps.zip"  # trim
 
-    # model_name = "15.19.28-04.26.2022/ddpg_1000000_steps.zip"  # trim
-    # model_name = "15.19.04-04.26.2022/ddpg_1000000_steps.zip"  # trim
-    # model_name = "15.14.05-04.26.2022/td3_1000000_steps.zip"  # trim
-    # model_name = "15.18.24-04.26.2022/td3_1000000_steps.zip"  # trim
+    # model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"
+    model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"
 
-    model_name = "11.59.43-04.27.2022/td3_1160000_steps.zip"  # tight looping
+    # model_name = "13.03.00-05.03.2022/td3_1880000_steps.zip"  # xy GOOD
+    # model_name = "13.02.29-05.03.2022/td3_1960000_steps.zip"  # xy
+    # model_name = "06.23.29-05.05.2022/td3_1080000_steps.zip"  # xy
+
+    # model_name = "15.22.52-04.26.2022/ddpg_800000_steps.zip"  # pendulum
+    # model_name = "13.19.56-05.11.2022/td3_2000000_steps.zip"  # pendulum
 
     # define paths
     tf_writer_path = tensorboard_logs_dir + start_time
@@ -467,7 +481,6 @@ if __name__ == "__main__":
 
         env_path = model_dir + env_name
         model_path = model_dir + model_name
-
         trainer_stonefish.run_node(
             params=parameter_dict,
             model_path=model_path,
