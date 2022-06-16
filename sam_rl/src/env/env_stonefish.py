@@ -311,8 +311,8 @@ class SAMEnv(SamRosInterface):
         Make it go to the surface by changing buyoancy
         """
         # reset state to initial
-        vbs = PercentStamped()
-        self.vbs_pub.publish(vbs)
+        # vbs = PercentStamped()
+        # self.vbs_pub.publish(vbs)
         # time.sleep(10)
         observed_state = self._get_obs()
         return observed_state

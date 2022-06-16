@@ -465,15 +465,15 @@ def test(model_type: str, params):
         fig.suptitle(title)
         plt.savefig(plot_dir + f"{epoch}_traj_2d")
 
-    # model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d
+    model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d
     # model_name = "19.29.39-03.22.2022/td3_1290000_steps.zip"  # pink xy 6d
     # model_name = "19.26.44-03.22.2022/ppo_900000_steps.zip"  # light blue trim 6d
-    model_name = "10.52.03-03.23.2022/td3_240000_steps.zip"  # orange 6d
+    # model_name = "10.52.03-03.23.2022/td3_240000_steps.zip"  # orange 6d
 
     # model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"  # gray 12d
     # model_name = "09.43.06-03.21.2022/td3_420000_steps.zip"  # blue 12d
     # model_name = "19.17.38-03.22.2022/td3_1230000_steps.zip"  # red 12d
-    env_name = "13.36.38-03.15.2022/td3_1050000_steps_env.pkl"
+    # env_name = "13.36.38-03.15.2022/td3_1050000_steps_env.pkl"
 
     env_path = params["model_dir"] + env_name
     model_path = params["model_dir"] + model_name
@@ -684,7 +684,7 @@ if __name__ == "__main__":
         import trainer_stonefish
 
         model_name = "08.53.18-03.22.2022/td3_840000_steps.zip"  # blue 6d
-
+        # model_name = "08.52.04-03.22.2022/td3_750000_steps.zip"  # gray 12d
         # model_name = "19.17.38-03.22.2022/td3_1230000_steps.zip"  # red 12d
         env_name = "15.53.43-03.16.2022/td3_999750_steps_env.pkl"
 
