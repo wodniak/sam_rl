@@ -48,7 +48,7 @@ class SamRosInterface(object):
 
         # Topics for feedback and actuators
         state_feedback_topic = rospy.get_param(
-            "~state_feedback_topic", default="/sam/sim/odom"
+            "~state_feedback_topic", default="/sam/dr/odom"
         )
         setpoint_topic = rospy.get_param(
             "~setpoint_topic", default="/sam/ctrl/rl/setpoint"
@@ -91,7 +91,7 @@ class SamRosInterface(object):
         """
         x = odom_msg.pose.pose.position.y
         y = odom_msg.pose.pose.position.x
-        z = odom_msg.pose.pose.position.z
+        z = -odom_msg.pose.pose.position.z
         eta0 = odom_msg.pose.pose.orientation.w
         eps1 = odom_msg.pose.pose.orientation.x
         eps2 = odom_msg.pose.pose.orientation.y

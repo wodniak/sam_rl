@@ -29,6 +29,22 @@ import rospy
 import numpy as np
 from env.env_stonefish import SAMEnv
 from stable_baselines3 import TD3, DDPG, SAC, PPO
+from smarc_msgs.msg import ThrusterRPM
+from sam_msgs.msg import ThrusterAngles, PercentStamped
+
+
+def publish_nominal_controls(env):
+    # Publish neutral controls if needed
+    vbs = PercentStamped()
+    lcg = PercentStamped()
+
+    vbs.value = 48
+    lcg.value = 48
+
+    print("publishing nominal controls to actuators")
+
+    env.vbs_pub.publish(vbs)
+    env.lcg_pub.publish(lcg)
 
 
 def test(model_type: str, model_path: str, env: SAMEnv, max_timesteps: int):
@@ -59,22 +75,27 @@ def test(model_type: str, model_path: str, env: SAMEnv, max_timesteps: int):
         ep_t = np.linspace(0, max_timesteps, max_timesteps).astype(int)
 
         ep_reward = 0
+        info = {}
         for ts in range(max_timesteps):
             obs -= setpoint  # will follow setpoint
             action, _states = model.predict(obs)
 
-            obs, rewards, dones, info = env.step(action)
+            rewards = 0
+            info = {}
+            if abs(obs[1] - setpoint[1]) < 0.5:
+                publish_nominal_controls(env)
+            else:
+                obs, rewards, dones, info = env.step(action)
+                print(
+                    "[{}] {}\n{}\n{}\n".format(
+                        ts, setpoint, info["state"], info["actions"]
+                    )
+                )
+                # ep_actions[ts] = [*info["actions"].values()]  # save
+                # ep_states[ts] = list(itertools.chain(*info["state"].values()))  # save
+
             end_state = obs
             ep_reward += rewards
-
-            ep_actions[ts] = [*info["actions"].values()]  # save
-            ep_states[ts] = list(itertools.chain(*info["state"].values()))  # save
-
-            # print(
-            #     "[{}] {}\n{}\n{}\n{}\n{}\n".format(
-            #         ts, setpoint, info["state"], info["actions"], info["rewards"], obs
-            #     )
-            # )
 
         # after episode
         # print(f'[{episode}]\n \tsetpoint = {setpoint}\n \
